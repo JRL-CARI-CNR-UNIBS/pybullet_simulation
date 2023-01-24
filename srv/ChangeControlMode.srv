@@ -1,0 +1,4 @@
+string[] robot_names
+string control_mode
+---
+string result

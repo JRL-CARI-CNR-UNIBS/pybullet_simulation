@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>pybullet_utils</name>
+  <version>0.0.0</version>
+  <description>The pybullet_utils package</description>
+
+  <maintainer email="gauss@todo.todo">gauss</maintainer>
+
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>message_generation</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>message_runtime</depend>
+
+  <export>
+
+  </export>
+</package>
