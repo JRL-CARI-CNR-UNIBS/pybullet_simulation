@@ -4,33 +4,83 @@ import os
 import pybullet as p
 import pybullet_data
 import rospy
+import tf
+import time
+from geometry_msgs.msg import WrenchStamped
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
 from threading import Thread
+from threading import Lock
 from rosgraph_msgs.msg import Clock
 from pybullet_utils.srv import SpawnModel
+from pybullet_utils.srv import DeleteModel
 from pybullet_utils.srv import ChangeControlMode
+from pybullet_utils.srv import SaveState
+from pybullet_utils.srv import RestoreState
+from pybullet_utils.srv import DeleteState
+from pybullet_utils.srv import SensorReset
 
 
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+def green_p(msg):
+    print('\033[92m' + msg + '\033[0m')
 
 
-def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_name, joint_control_mode, joint_effort_limits):
-    print(srv.robot_names)
-    print(' ')
-    print(robot_id.keys())
+def red_p(msg):
+    print('\033[91m' + msg + '\033[0m')
+
+
+def blue_p(msg):
+    print('\033[94m' + msg + '\033[0m')
+
+
+def yellow_p(msg):
+    print('\033[93m' + msg + '\033[0m')
+
+
+def cyan_p(msg):
+    print('\033[96m' + msg + '\033[0m')
+
+
+class JointTargetSubscriber:
+    def __init__(self, robot_id, joint_name_to_index, joint_control_mode, controlled_joint_name, robot_name, jt_topic, control_mode_lock):
+        self.robot_id              = robot_id
+        self.joint_name_to_index   = joint_name_to_index
+        self.joint_control_mode    = joint_control_mode
+        self.controlled_joint_name = controlled_joint_name
+        self.robot_name            = robot_name
+        self.jt_topic              = jt_topic
+        self.control_mode_lock                  = control_mode_lock
+        rospy.Subscriber(self.jt_topic,
+                         JointState,
+                         self.jointTargetSubscriber)
+
+    def jointTargetSubscriber(self, data):
+        self.control_mode_lock.acquire()
+        for joint_id in range(len(data.name)):
+            if data.name[joint_id] in self.controlled_joint_name[self.robot_name]:
+                if (self.joint_control_mode[self.robot_name] == 'position'):
+                    p.setJointMotorControl2(self.robot_id[self.robot_name],
+                                            self.joint_name_to_index[self.robot_name][data.name[joint_id]],
+                                            p.POSITION_CONTROL,
+                                            targetPosition=data.position[joint_id])
+                elif (self.joint_control_mode[self.robot_name] == 'velocity'):
+                    p.setJointMotorControl2(self.robot_id[self.robot_name],
+                                            self.joint_name_to_index[self.robot_name][data.name[joint_id]],
+                                            p.VELOCITY_CONTROL,
+                                            targetVelocity=data.velocity[joint_id])
+                elif (self.joint_control_mode[self.robot_name] == 'torque'):
+                    p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
+                                            jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
+                                            controlMode=p.TORQUE_CONTROL,
+                                            force=data.effort[joint_id])
+        self.control_mode_lock.release()
+
+
+def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_name, joint_control_mode, joint_effort_limits, control_mode_lock):
+    control_mode_lock.acquire()
     for robot_name in srv.robot_names:
         if robot_name in robot_id.keys():
-            print(controlled_joint_name[robot_name])
+            green_p(str(controlled_joint_name[robot_name]))
             for joint_name in controlled_joint_name[robot_name]:
                 joint_control_mode[robot_name] = srv.control_mode
                 if (joint_control_mode[robot_name] == 'position'):
@@ -38,14 +88,17 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
                                             joint_name_to_index[robot_name][joint_name],
                                             p.POSITION_CONTROL,
                                             force=joint_effort_limits[robot_name][joint_name])
-                    print('Robot: ' + robot_name + ', Joint: ' + joint_name + ', ' + joint_control_mode[robot_name] + ', max_force: ' + str(joint_effort_limits[robot_name][joint_name]))
+                    green_p('Robot: ' + robot_name + ', Joint: ' + joint_name + ', ' + 'position' + ', max_force: ' + str(joint_effort_limits[robot_name][joint_name]))
                 elif (joint_control_mode[robot_name] == 'velocity'):
                     p.setJointMotorControl2(robot_id[robot_name],
                                             joint_name_to_index[robot_name][joint_name],
                                             p.VELOCITY_CONTROL,
                                             force=joint_effort_limits[robot_name][joint_name])
-                    print('Robot: ' + robot_name + ', Joint: ' + joint_name + ', ' + joint_control_mode[robot_name] + ', max_force: ' + str(joint_effort_limits[robot_name][joint_name]))
+                    green_p('Robot: ' + robot_name + ', Joint: ' + joint_name + ', ' + 'velocity' + ', max_force: ' + str(joint_effort_limits[robot_name][joint_name]))
                 elif (joint_control_mode[robot_name] == 'torque'):
+                    yellow_p('In torque joint_control')
+                    yellow_p('robot_name: ' + robot_name)
+                    yellow_p('joint_name: ' + joint_name)
                     p.setJointMotorControl2(robot_id[robot_name],
                                             joint_name_to_index[robot_name][joint_name],
                                             p.VELOCITY_CONTROL,
@@ -54,81 +107,83 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
                                             joint_name_to_index[robot_name][joint_name],
                                             p.TORQUE_CONTROL,
                                             force=0.0)
-                    print('Robot: ' + robot_name + ', Joint: ' + joint_name + ', ' + joint_control_mode[robot_name] + ', force: 0')
+                    green_p('Robot: ' + robot_name + ', Joint: ' + joint_name + ', ' + 'torque' + ', force: 0')
                 else:
-                    print(srv.control_mode + ' control mode not exists')
+                    red_p(srv.control_mode + ' control mode not exists')
                     return 'false'
         else:
-            print(robot_name + ' robot not exists')
+            red_p(robot_name + ' robot not exists')
             return 'false'
+    control_mode_lock.release()
     return 'true'
 
 
-def spawn_models(srv):
-    for x in range(len(srv.models_names)):
-        model_name = srv.models_names[x]
-        print(model_name)
+def spawn_model(srv, model_id):
+    if not srv.model_name:
+        red_p('Name list is empty')
+        return 'false'
+    if not srv.pose:
+        red_p('Poses list is empty')
+        return 'false'
+    if (len(srv.model_name) != len(srv.pose) or len(srv.model_name) != len(srv.object_name)):
+        red_p('Object name, model name and pose do not have the same leng')
+    for x in range(len(srv.model_name)):
+        object_name = srv.object_name[x]
+        model_name = srv.model_name[x]
+        pose = srv.pose[x]
+        if object_name in model_id.keys():
+            red_p('Already exists an object with this name')
+            return 'false'
+        green_p('You want to spawn a ' + model_name + ' with the name ' + object_name)
         if rospy.has_param(model_name):
             model_info = rospy.get_param(model_name)
             if 'foulder_path' in model_info:
                 foulder_path = model_info['foulder_path']
                 p.setAdditionalSearchPath(model_info['foulder_path'])
-                print(bcolors.OKGREEN + '  foulder_path: ' + foulder_path + bcolors.ENDC)
+                green_p('  foulder_path: ' + foulder_path)
             else:
-                print(bcolors.FAIL + 'No param /' + model_name + '/foulder_path' + bcolors.ENDC)
+                red_p('No param /' + model_name + '/foulder_path')
                 return 'false'
             if 'urdf_file_name' in model_info:
                 file_type = 'urdf'
                 file_name = model_info['urdf_file_name']
-                print(bcolors.OKGREEN + '  urdf_file_name: ' + file_name + bcolors.ENDC)
+                green_p('  urdf_file_name: ' + file_name)
             elif 'xacro_file_name' in model_info:
                 file_type = 'xacro'
                 file_name = model_info['xacro_file_name']
-                print(bcolors.OKGREEN + '  xacro_file_name: ' + file_name + bcolors.ENDC)
+                green_p('  xacro_file_name: ' + file_name)
             else:
-                print(bcolors.FAIL + 'No param /' + model_name + '/xacro_file_name(or urdf_file_name)' + bcolors.ENDC)
-                return 'false'
-            if 'position' in model_info:
-                startPos = model_info['position']
-                print(bcolors.OKGREEN + '  startPos: ['
-                                      + str(startPos[0]) + ','
-                                      + str(startPos[1]) + ','
-                                      + str(startPos[2]) + ']'
-                                      + bcolors.ENDC)
-            else:
-                print(bcolors.FAIL + 'No param /' + model_name + '/position' + bcolors.ENDC)
-                return 'false'
-            if 'orientation' in model_info:
-                startOrientation = p.getQuaternionFromEuler(model_info['orientation'])
-                print(bcolors.OKGREEN + '  orientation: ['
-                                      + str(startOrientation[0]) + ','
-                                      + str(startOrientation[1]) + ','
-                                      + str(startOrientation[2]) + ']'
-                                      + bcolors.ENDC)
-            else:
-                print(bcolors.FAIL + 'No param /' + model_name + '/orientation' + bcolors.ENDC)
-                return 'false'
-            if 'fixed' in model_info:
-                fixed = model_info['fixed']
-                print(bcolors.OKGREEN + '  fixed: ' + str(fixed) + bcolors.ENDC)
-            else:
-                print(bcolors.FAIL + 'No param /' + model_name + '/fixed' + bcolors.ENDC)
+                red_p('No param /' + model_name + '/xacro_file_name(or urdf_file_name)')
                 return 'false'
         else:
-            print('Model param not found')
+            red_p('Model param not found')
             return 'false'
         if (file_type == 'xacro'):
             xacro_file_name = foulder_path + '/' + file_name + '.xacro'
             urdf_file_name = foulder_path + '/' + file_name + '.urdf'
             os.system('rosrun xacro xacro ' + xacro_file_name + ' > ' + urdf_file_name)
 
+        start_pos = [pose.position.x, pose.position.y, pose.position.z]
+        start_orientation = [pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]
         file_name += '.urdf'
-        p.loadURDF(file_name, startPos, startOrientation, 0, fixed)
-    print('Model spawned')
+        model_id[object_name] = p.loadURDF(file_name, start_pos, start_orientation, 0, 0)
+    green_p('Model spawned')
+    green_p(str(model_id))
     return 'true'
 
 
-def jointStatePublisher(robot_id, js_publishers, joint_states, joint_state_publish_rate, joint_name_to_index, gear_constraint_to_joint):
+def delete_model(srv, model_id):
+    for object_name in srv.object_name:
+        if object_name not in model_id.keys():
+            yellow_p(object_name + ' is not in the scene')
+            continue
+        id = model_id[object_name]
+        del model_id[object_name]
+        p.removeBody(id)
+    return 'true'
+
+
+def joint_state_publisher(robot_id, js_publishers, joint_states, joint_state_publish_rate, joint_name_to_index, gear_constraint_to_joint):
     name = []
     position = []
     velocity = []
@@ -152,7 +207,7 @@ def jointStatePublisher(robot_id, js_publishers, joint_states, joint_state_publi
                 else:
                     effort.append(joint_states[robot_name][joint_name_to_index[robot_name][joint_name]][3])
             js_msg.header = Header()
-            js_msg.header.stamp = rospy.Time.now()  # ???
+            js_msg.header.stamp = rospy.Time.now()
             js_msg.name = name
             js_msg.position = position
             js_msg.velocity = velocity
@@ -161,31 +216,119 @@ def jointStatePublisher(robot_id, js_publishers, joint_states, joint_state_publi
         rate.sleep()
 
 
-def jointTargetSubscriber(data, robot_id, joint_name_to_index, joint_control_mode, controlled_joint_name):
-    for joint_id in range(len(data.name)):
-        if data.name[joint_id] in controlled_joint_name:
-            if (joint_control_mode == 'position'):
-                p.setJointMotorControl2(robot_id, joint_name_to_index[data.name[joint_id]],
-                                        p.POSITION_CONTROL, targetPosition=data.position[joint_id])
-            elif (joint_control_mode == 'velocity'):
-                p.setJointMotorControl2(robot_id, joint_name_to_index[data.name[joint_id]],
-                                        p.VELOCITY_CONTROL, targetVelocity=data.velocity[joint_id])
-            elif (joint_control_mode == 'torque'):
-                p.setJointMotorControl2(bodyIndex=robot_id,
-                                        jointIndex=joint_name_to_index[data.name[joint_id]],
-                                        controlMode=p.TORQUE_CONTROL,
-                                        force=data.effort[joint_id])
-#                print(data.name + ' force: ' + data.effort[joint_id])
-#            elif (joint_control_mode == 'pd'):
-#                p.setJointMotorControl2(robot_id, joint_name_to_index[data.name[joint_id]],
-#                                        p.PD_CONTROL, data.position[joint_id])
+def sensor_wrench_publisher(robot_id, sw_publishers, joint_name_to_index, joint_state_publish_rate, sensor_offset, sensor_offset_lock):
+    rate = rospy.Rate(joint_state_publish_rate)
+    sw_msg = WrenchStamped()
+    while not rospy.is_shutdown():
+        sensor_offset_lock.acquire()
+        for robot_name in sw_publishers.keys():
+            joint_ids = []
+            for joint_name in sw_publishers[robot_name].keys():
+                joint_ids.append(joint_name_to_index[robot_name][joint_name])
+            sensor_wrench = p.getJointStates(robot_id[robot_name], joint_ids)
+            for joint_name in sw_publishers[robot_name].keys():
+                index = list(sw_publishers[robot_name]).index(joint_name)
+                sw_msg.header = Header()
+                sw_msg.header.stamp = rospy.Time.now()
+                sw_msg.wrench.force.x  = sensor_wrench[index][2][0] - sensor_offset[robot_name][joint_name][0]
+                sw_msg.wrench.force.y  = sensor_wrench[index][2][1] - sensor_offset[robot_name][joint_name][1]
+                sw_msg.wrench.force.z  = sensor_wrench[index][2][2] - sensor_offset[robot_name][joint_name][2]
+                sw_msg.wrench.torque.x = sensor_wrench[index][2][3] - sensor_offset[robot_name][joint_name][3]
+                sw_msg.wrench.torque.y = sensor_wrench[index][2][4] - sensor_offset[robot_name][joint_name][4]
+                sw_msg.wrench.torque.z = sensor_wrench[index][2][5] - sensor_offset[robot_name][joint_name][5]
+                sw_publishers[robot_name][joint_name].publish(sw_msg)
+        sensor_offset_lock.release()
+        rate.sleep()
+
+
+def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offset, sensor_offset_lock):
+    sensor_offset_lock.acquire()
+    robot_name = srv.robot_name
+    joint_name = srv.joint_name
+    if robot_name not in sw_publishers:
+        red_p(robot_name + ' do not have any sensor')
+        return 'false'
+    if joint_name not in sw_publishers[robot_name]:
+        red_p('The joint ' + joint_name + ' do not has a sensor')
+        return 'false'
+    sensor_wrench = p.getJointStates(robot_id[robot_name], [joint_name_to_index[robot_name][joint_name]])
+    sensor_offset[robot_name][joint_name] = [sensor_wrench[0][2][0],
+                                             sensor_wrench[0][2][1],
+                                             sensor_wrench[0][2][2],
+                                             sensor_wrench[0][2][3],
+                                             sensor_wrench[0][2][4],
+                                             sensor_wrench[0][2][5]]
+    sensor_offset_lock.release()
+    return 'true'
+
+
+def tf_publisher(model_id):
+    if rospy.has_param('object_tf_publish_rate'):
+        tf_publish_rate = rospy.get_param('object_tf_publish_rate')
+        green_p('object_tf_publish_rate: ' + str(tf_publish_rate))
+    else:
+        tf_publish_rate = 250
+        yellow_p('object_tf_publish_rate not set, default value: ' + str(tf_publish_rate))
+    rate = rospy.Rate(tf_publish_rate)
+    br = tf.TransformBroadcaster()
+    current_time = rospy.Time.now().to_sec()
+    while not rospy.is_shutdown():
+        if (current_time != rospy.Time.now().to_sec()):
+            for model_name in model_id.keys():
+                pose = p.getBasePositionAndOrientation(model_id[model_name])
+                br.sendTransform((pose[0][0], pose[0][1], pose[0][2]),
+                                 (pose[1][0], pose[1][1], pose[1][2], pose[1][3]),
+                                 rospy.Time.now(),
+                                 model_name,
+                                 "world")
+            current_time = rospy.Time.now().to_sec()
+        rate.sleep()
+
+
+    # fare in modo che nel salvataggio dello stato venga salvat anche la configurazione dei vari robot e che venga
+    # settata come nuovo target nel momento in cui venga resettato lo specifica stato
+def save_state(srv, state_id):
+    if not srv.state_name:
+        red_p('Name is empty')
+        return 'false'
+    if srv.state_name in state_id.keys():
+        red_p(srv.state_name + ', a state whit this name already exists')
+        return 'false'
+    state_id[srv.state_name] = p.saveState()
+    return 'true'
+
+
+def restore_state(srv, state_id):
+    if not srv.state_name:
+        red_p('Name is empty')
+        return 'false'
+    if srv.state_name not in state_id.keys():
+        red_p(srv.state_name + ', no state with this name')
+        return 'false'
+    p.restoreState(state_id[srv.state_name])
+    return 'true'
+
+
+def delete_state(srv, state_id):
+    if not srv.state_name:
+        red_p('Name list is empty')
+        return 'false'
+    for state_name in srv.state_name.keys():
+        if state_name not in state_id.keys():
+            red_p(state_name + ', no state with this name')
+        else:
+            p.removeState(state_id[srv.state_name])
+    return 'true'
 
 
 def main():
+    control_mode_lock = Lock()
+    sensor_offset_lock = Lock()
 
     controlled_joint_name = {}
     gear_constraint_to_joint = {}
     robot_id = {}
+    model_id = {}
     link_name_to_index = {}
     joint_name_to_index = {}
     joint_state_publish_rate = None
@@ -194,32 +337,44 @@ def main():
     joint_states = {}
     joint_control_mode = {}
     joint_effort_limits = {}
+    jt_pubishers = {}
+    state_id = {}
+    sw_publishers = {}
+    sensor_offset = {}
+
     rospy.init_node('pybullet_simulation')
 
-    rospy.Service('pybullet_spawn_model', SpawnModel, spawn_models)
+    rospy.Service('pybullet_spawn_model',
+                  SpawnModel,
+                  lambda msg:
+                      spawn_model(msg,
+                                  model_id))
+    rospy.Service('pybullet_delete_model',
+                  DeleteModel,
+                  lambda msg:
+                      delete_model(msg,
+                                   model_id))
     robot_names = []
-    print(bcolors.OKGREEN + 'Wait for robot names' + bcolors.ENDC)
+    green_p('Wait for robot names')
     ready = False
     while not ready:
         if rospy.has_param('/robots'):
             robot_names = rospy.get_param('/robots')
-            print(bcolors.OKGREEN + 'Robot:' + bcolors.ENDC)
+            green_p('Robot:')
             for robot_name in robot_names:
-                print(bcolors.OKGREEN + ' - ' + robot_name + bcolors.ENDC)
+                green_p(' - ' + robot_name)
             ready = True
-
-    rospy.set_param('use_sim_time', True)
 
     js_publishers = {}
 
-    print(bcolors.OKGREEN + 'Topic generated:' + bcolors.ENDC)
+    green_p('Topic generated:')
     for robot_name in robot_names:
         js_topic = '/' + robot_name + '/joint_states'
         js_publishers[robot_name] = rospy.Publisher('/' + robot_name + '/joint_states', JointState, queue_size=1)
-        print(bcolors.OKGREEN + ' - ' + js_topic + bcolors.ENDC)
+        green_p(' - ' + js_topic)
 
     physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
-#    physicsClient = p.connect(p.DIRECT)
+
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     planeId = p.loadURDF("plane.urdf")
     p.setGravity(0, 0, -9.8)
@@ -227,16 +382,16 @@ def main():
         camera_init = rospy.get_param('camera_init')
         all_info = True
         if 'distance' not in camera_init:
-            print(bcolors.FAIL + 'No param /camera_init/distance' + bcolors.ENDC)
+            red_p('No param /camera_init/distance')
             all_info = False
         if 'yaw' not in camera_init:
-            print(bcolors.FAIL + 'No param /camera_init/yaw' + bcolors.ENDC)
+            red_p('No param /camera_init/yaw')
             all_info = False
         if 'pitch' not in camera_init:
-            print(bcolors.FAIL + 'No param /camera_init/pitch' + bcolors.ENDC)
+            red_p('No param /camera_init/pitch')
             all_info = False
         if 'target_position' not in camera_init:
-            print(bcolors.FAIL + 'No param /camera_init/target_position' + bcolors.ENDC)
+            red_p('No param /camera_init/target_position')
             all_info = False
         if all_info:
             p.resetDebugVisualizerCamera(cameraDistance      =camera_init['distance'],
@@ -246,84 +401,96 @@ def main():
 
     if rospy.has_param('/simulation_step_time'):
         simulation_step_time = rospy.get_param('/simulation_step_time')
-        print(bcolors.OKGREEN + 'simulation_step_time: ' + str(simulation_step_time) + bcolors.ENDC)
+        green_p('simulation_step_time: ' + str(simulation_step_time))
     else:
-        print(bcolors.FAIL + 'No param /simulation_step_time' + bcolors.ENDC)
+        red_p('No param /simulation_step_time')
         raise SystemExit
     if rospy.has_param('/real_step_time'):
         desidered_real_step_time = rospy.get_param('/real_step_time')
-        print(bcolors.OKGREEN + 'real_step_time: ' + str(desidered_real_step_time) + bcolors.ENDC)
+        green_p('real_step_time: ' + str(desidered_real_step_time))
     else:
-        print(bcolors.FAIL + 'No param /real_step_time' + bcolors.ENDC)
+        red_p('No param /real_step_time')
         raise SystemExit
     if rospy.has_param('/joint_state_publish_rate'):
         joint_state_publish_rate = rospy.get_param('/joint_state_publish_rate')
-        print(bcolors.OKGREEN + 'joint_state_publish_rate: ' + str(joint_state_publish_rate) + bcolors.ENDC)
+        green_p('joint_state_publish_rate: ' + str(joint_state_publish_rate))
     else:
-        print(bcolors.FAIL + 'No param /joint_state_publish_rate' + bcolors.ENDC)
+        red_p('No param /joint_state_publish_rate')
         raise SystemExit
 
+
     for robot_name in robot_names:
-        print(bcolors.OKGREEN + 'For robot ' + robot_name + ':' + bcolors.ENDC)
+        start_configuration = {}
+        green_p('For robot ' + robot_name + ':')
         if rospy.has_param('/' + robot_name):
             robot_info = rospy.get_param('/' + robot_name)
             for key in robot_info.keys():
-                print(bcolors.OKGREEN + key + ': ' + str(robot_info[key]) + bcolors.ENDC)
-#            print(robot_info)
+                green_p(key + ': ' + str(robot_info[key]))
+
             if 'foulder_path' in robot_info:
                 foulder_path = robot_info['foulder_path']
                 p.setAdditionalSearchPath(robot_info['foulder_path'])
-                print(bcolors.OKGREEN + '  foulder_path: ' + foulder_path + bcolors.ENDC)
+                green_p('  foulder_path: ' + foulder_path)
             else:
-                print(bcolors.FAIL + 'No param /' + robot_name + '/foulder_path' + bcolors.ENDC)
+                red_p('No param /' + robot_name + '/foulder_path')
                 raise SystemExit
             if 'urdf_file_name' in robot_info:
                 file_type = 'urdf'
                 file_name = robot_info['urdf_file_name']
-                print(bcolors.OKGREEN + '  urdf_file_name: ' + file_name + bcolors.ENDC)
+                green_p('  urdf_file_name: ' + file_name)
             elif 'xacro_file_name' in robot_info:
                 file_type = 'xacro'
                 file_name = robot_info['xacro_file_name']
-                print(bcolors.OKGREEN + '  xacro_file_name: ' + file_name + bcolors.ENDC)
+                green_p('  xacro_file_name: ' + file_name)
             else:
-                print(bcolors.FAIL + 'No param /' + robot_name + '/xacro_file_name(or urdf_file_name)' + bcolors.ENDC)
+                red_p('No param /' + robot_name + '/xacro_file_name(or urdf_file_name)')
                 raise SystemExit
             if 'start_position' in robot_info:
-                startPos = robot_info['start_position']
-                print(bcolors.OKGREEN + '  startPos: ['
-                                      + str(startPos[0]) + ','
-                                      + str(startPos[1]) + ','
-                                      + str(startPos[2]) + ']'
-                                      + bcolors.ENDC)
+                start_pos = robot_info['start_position']
+                green_p('  start_pos: [' +
+                        str(start_pos[0]) + ',' +
+                        str(start_pos[1]) + ',' +
+                        str(start_pos[2]) + ']')
             else:
-                print(bcolors.FAIL + 'No param /' + robot_name + '/start_position' + bcolors.ENDC)
+                red_p('No param /' + robot_name + '/start_position')
                 raise SystemExit
             if 'start_orientation' in robot_info:
-                startOrientation = p.getQuaternionFromEuler(robot_info['start_orientation'])
-                print(bcolors.OKGREEN + '  start_orientation: ['
-                                      + str(startOrientation[0]) + ','
-                                      + str(startOrientation[1]) + ','
-                                      + str(startOrientation[2]) + ']'
-                                      + bcolors.ENDC)
+                start_orientation = p.getQuaternionFromEuler(robot_info['start_orientation'])
+                green_p('  start_orientation: [' +
+                        str(start_orientation[0]) + ',' +
+                        str(start_orientation[1]) + ',' +
+                        str(start_orientation[2]) + ']')
             else:
-                print(bcolors.FAIL + 'No param /' + robot_name + '/start_orientation' + bcolors.ENDC)
+                red_p('No param /' + robot_name + '/start_orientation')
                 raise SystemExit
             if 'fixed' in robot_info:
                 fixed = robot_info['fixed']
-                print(bcolors.OKGREEN + '  fixed: ' + str(fixed) + bcolors.ENDC)
+                green_p('  fixed: ' + str(fixed))
             else:
-                print(bcolors.FAIL + 'No param /' + robot_name + '/fixed' + bcolors.ENDC)
+                red_p('No param /' + robot_name + '/fixed')
                 raise SystemExit
             if 'controlled_joint_name' in robot_info:
                 controlled_joint_name[robot_name] = robot_info['controlled_joint_name']
-                array_str = bcolors.OKGREEN + '  controlled_joint_name: ['
+                array_str = '  controlled_joint_name: ['
                 for joint_controlled_name in controlled_joint_name[robot_name]:
                     array_str += joint_controlled_name + ' '
-                array_str += ']' + bcolors.ENDC
-                print(array_str)
+                array_str += ']'
+                green_p(array_str)
             else:
-                print(bcolors.FAIL + 'No param /' + robot_name + '/controller_joint_name' + bcolors.ENDC)
+                red_p('No param /' + robot_name + '/controller_joint_name')
                 raise SystemExit
+            if 'start_configuration' in robot_info:
+                if (len(controlled_joint_name[robot_name]) == len(robot_info['start_configuration'])):
+                    for index in range(len(controlled_joint_name[robot_name])):
+                        start_configuration[controlled_joint_name[robot_name][index]] = robot_info['start_configuration'][index]
+                else:
+                    yellow_p('start_configuration size is wrong')
+                    for index in range(len(controlled_joint_name[robot_name])):
+                        start_configuration[controlled_joint_name[robot_name][index]] = 0.0
+            else:
+                yellow_p('No param /' + robot_name + '/start_configuration')
+                for index in range(len(controlled_joint_name[robot_name])):
+                    start_configuration[controlled_joint_name[robot_name][index]] = 0.0
 
             if (file_type == 'xacro'):
                 xacro_file_name = foulder_path + '/' + file_name + '.xacro'
@@ -331,14 +498,14 @@ def main():
                 os.system('rosrun xacro xacro ' + xacro_file_name + ' > ' + urdf_file_name)
 
             file_name += '.urdf'
-            robot_id[robot_name] = p.loadURDF(file_name, startPos, startOrientation, 0, fixed, flags=p.URDF_USE_INERTIA_FROM_FILE)
-            print(bcolors.OKGREEN + '  robot_id: ' + str(robot_id[robot_name]) + bcolors.ENDC)
+            robot_id[robot_name] = p.loadURDF(file_name, start_pos, start_orientation, 0, fixed, flags=p.URDF_USE_INERTIA_FROM_FILE)
+            green_p('  robot_id: ' + str(robot_id[robot_name]))
 
             link_name_to_index[robot_name] = {p.getBodyInfo(robot_id[robot_name])[0].decode('UTF-8'): -1, }
             joint_name_to_index[robot_name] = {}
             joint_effort_limits[robot_name] = {}
 
-            print(bcolors.OKGREEN + '  joint_info: ' + bcolors.ENDC)
+            green_p('  joint_info: ')
             for joint_id in range(p.getNumJoints(robot_id[robot_name])):
                 link_name = p.getJointInfo(robot_id[robot_name], joint_id)[12].decode('UTF-8')
                 link_name_to_index[robot_name][link_name] = joint_id
@@ -346,116 +513,111 @@ def main():
                 joint_name_to_index[robot_name][joint_name] = joint_id
                 joint_effort_limits[robot_name][joint_name] = p.getJointInfo(robot_id[robot_name], joint_id)[10]
 
-                print(bcolors.OKGREEN + '    -jointName: '        + p.getJointInfo(robot_id[robot_name], joint_id)[1].decode('UTF-8') + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointIndex: '       + str(p.getJointInfo(robot_id[robot_name], joint_id)[0])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointType: '        + str(p.getJointInfo(robot_id[robot_name], joint_id)[2])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     qIndex: '           + str(p.getJointInfo(robot_id[robot_name], joint_id)[3])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     uIndex: '           + str(p.getJointInfo(robot_id[robot_name], joint_id)[4])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     flags: '            + str(p.getJointInfo(robot_id[robot_name], joint_id)[5])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointDamping: '     + str(p.getJointInfo(robot_id[robot_name], joint_id)[6])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointFriction: '    + str(p.getJointInfo(robot_id[robot_name], joint_id)[7])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointLowerLimit: '  + str(p.getJointInfo(robot_id[robot_name], joint_id)[8])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointUpperLimit: '  + str(p.getJointInfo(robot_id[robot_name], joint_id)[9])  + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointMaxForce: '    + str(p.getJointInfo(robot_id[robot_name], joint_id)[10]) + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointMaxVelocity: ' + str(p.getJointInfo(robot_id[robot_name], joint_id)[11]) + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     linkName: '         + p.getJointInfo(robot_id[robot_name], joint_id)[12].decode('UTF-8') + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     jointAxis: '        + str(p.getJointInfo(robot_id[robot_name], joint_id)[13]) + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     parentFramePos: '   + str(p.getJointInfo(robot_id[robot_name], joint_id)[14]) + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     parentFrameOrn: '   + str(p.getJointInfo(robot_id[robot_name], joint_id)[15]) + bcolors.ENDC)
-                print(bcolors.OKGREEN + '     parentIndex: '      + str(p.getJointInfo(robot_id[robot_name], joint_id)[16]) + bcolors.ENDC)
+                green_p('    -jointName: '        + p.getJointInfo(robot_id[robot_name], joint_id)[1].decode('UTF-8'))
+                green_p('     jointIndex: '       + str(p.getJointInfo(robot_id[robot_name], joint_id)[0]))
+                green_p('     jointType: '        + str(p.getJointInfo(robot_id[robot_name], joint_id)[2]))
+                green_p('     qIndex: '           + str(p.getJointInfo(robot_id[robot_name], joint_id)[3]))
+                green_p('     uIndex: '           + str(p.getJointInfo(robot_id[robot_name], joint_id)[4]))
+                green_p('     flags: '            + str(p.getJointInfo(robot_id[robot_name], joint_id)[5]))
+                green_p('     jointDamping: '     + str(p.getJointInfo(robot_id[robot_name], joint_id)[6]))
+                green_p('     jointFriction: '    + str(p.getJointInfo(robot_id[robot_name], joint_id)[7]))
+                green_p('     jointLowerLimit: '  + str(p.getJointInfo(robot_id[robot_name], joint_id)[8]))
+                green_p('     jointUpperLimit: '  + str(p.getJointInfo(robot_id[robot_name], joint_id)[9]))
+                green_p('     jointMaxForce: '    + str(p.getJointInfo(robot_id[robot_name], joint_id)[10]))
+                green_p('     jointMaxVelocity: ' + str(p.getJointInfo(robot_id[robot_name], joint_id)[11]))
+                green_p('     linkName: '         + p.getJointInfo(robot_id[robot_name], joint_id)[12].decode('UTF-8'))
+                green_p('     jointAxis: '        + str(p.getJointInfo(robot_id[robot_name], joint_id)[13]))
+                green_p('     parentFramePos: '   + str(p.getJointInfo(robot_id[robot_name], joint_id)[14]))
+                green_p('     parentFrameOrn: '   + str(p.getJointInfo(robot_id[robot_name], joint_id)[15]))
+                green_p('     parentIndex: '      + str(p.getJointInfo(robot_id[robot_name], joint_id)[16]))
 
             if 'constraints' in robot_info:
                 constraints = robot_info['constraints']
-                print(bcolors.OKGREEN + '  constraints: ' + bcolors.ENDC)
+                green_p('  constraints: ')
                 for constraint in constraints:
                     if 'parent_body' in constraint:
                         parent_body = constraint['parent_body']
-                        print(bcolors.OKGREEN + '    - parent_body: ' + parent_body + bcolors.ENDC)
+                        green_p('    - parent_body: ' + parent_body)
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/parent_body' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/parent_body')
                         raise SystemExit
                     if 'parent_link' in constraint:
                         parent_link = constraint['parent_link']
-                        print(bcolors.OKGREEN + '      parent_link: ' + parent_link + bcolors.ENDC)
+                        green_p('      parent_link: ' + parent_link)
                     else:
                         print('No param /' + robot_name + '/constraint/parent_link')
-                        print(bcolors.FAIL + 'No /robots param' + bcolors.ENDC)
+                        red_p('No /robots param')
                         raise SystemExit
                     if 'child_body' in constraint:
                         child_body = constraint['child_body']
-                        print(bcolors.OKGREEN + '      child_body: ' + child_body + bcolors.ENDC)
+                        green_p('      child_body: ' + child_body)
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/child_body' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/child_body')
                         raise SystemExit
                     if 'child_link' in constraint:
                         child_link = constraint['child_link']
-                        print(bcolors.OKGREEN + '      child_link: ' + child_link + bcolors.ENDC)
+                        green_p('      child_link: ' + child_link)
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/child_link' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/child_link')
                         raise SystemExit
                     if 'type' in constraint:
                         type = constraint['type']
-                        print(bcolors.OKGREEN + '      type: ' + type + bcolors.ENDC)
+                        green_p('      type: ' + type)
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/type' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/type')
                         raise SystemExit
                     if 'axis' in constraint:
                         axis = constraint['axis']
-                        print(bcolors.OKGREEN + '      axis: ['
-                                              + str(axis[0]) + ','
-                                              + str(axis[1]) + ','
-                                              + str(axis[2]) + ']'
-                                              + bcolors.ENDC)
+                        green_p('      axis: [' +
+                                str(axis[0]) + ',' +
+                                str(axis[1]) + ',' +
+                                str(axis[2]) + ']')
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/axis' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/axis')
                         raise SystemExit
                     if 'parent_frame_position' in constraint:
                         parent_frame_position = constraint['parent_frame_position']
-                        print(bcolors.OKGREEN + '      parent_frame_position: ['
-                                              + str(parent_frame_position[0]) + ','
-                                              + str(parent_frame_position[1]) + ','
-                                              + str(parent_frame_position[2]) + ']'
-                                              + bcolors.ENDC)
+                        green_p('      parent_frame_position: [' +
+                                str(parent_frame_position[0]) + ',' +
+                                str(parent_frame_position[1]) + ',' +
+                                str(parent_frame_position[2]) + ']')
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/parent_frame_position' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/parent_frame_position')
                         raise SystemExit
                     if 'child_frame_position' in constraint:
                         child_frame_position = constraint['child_frame_position']
-                        print(bcolors.OKGREEN + '      child_frame_position: ['
-                                              + str(child_frame_position[0]) + ','
-                                              + str(child_frame_position[1]) + ','
-                                              + str(child_frame_position[2]) + ']'
-                                              + bcolors.ENDC)
+                        green_p('      child_frame_position: [' +
+                                str(child_frame_position[0]) + ',' +
+                                str(child_frame_position[1]) + ',' +
+                                str(child_frame_position[2]) + ']')
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/child_frame_position' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/child_frame_position')
                         raise SystemExit
                     if 'parent_frame_orientation' in constraint:
                         parent_frame_orientation = constraint['parent_frame_orientation']
-                        print(bcolors.OKGREEN + '      parent_frame_orientation: ['
-                                              + str(parent_frame_orientation[0]) + ','
-                                              + str(parent_frame_orientation[1]) + ','
-                                              + str(parent_frame_orientation[2]) + ','
-                                              + str(parent_frame_orientation[3]) + ']'
-                                              + bcolors.ENDC)
+                        green_p('      parent_frame_orientation: [' +
+                                str(parent_frame_orientation[0]) + ',' +
+                                str(parent_frame_orientation[1]) + ',' +
+                                str(parent_frame_orientation[2]) + ',' +
+                                str(parent_frame_orientation[3]) + ']')
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/parent_frame_orientation' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/parent_frame_orientation')
                         raise SystemExit
                     if 'child_frame_orientation' in constraint:
                         child_frame_orientation = constraint['child_frame_orientation']
-                        print(bcolors.OKGREEN + '      child_frame_orientation: ['
-                                              + str(child_frame_orientation[0]) + ','
-                                              + str(child_frame_orientation[1]) + ','
-                                              + str(child_frame_orientation[2]) + ','
-                                              + str(child_frame_orientation[3]) + ']'
-                                              + bcolors.ENDC)
+                        green_p('      child_frame_orientation: [' +
+                                str(child_frame_orientation[0]) + ',' +
+                                str(child_frame_orientation[1]) + ',' +
+                                str(child_frame_orientation[2]) + ',' +
+                                str(child_frame_orientation[3]) + ']')
                     else:
-                        print(bcolors.FAIL + 'No param /' + robot_name + '/constraint/child_frame_orientation' + bcolors.ENDC)
+                        red_p('No param /' + robot_name + '/constraint/child_frame_orientation')
                         raise SystemExit
                     if (type == 'prismatic'):
                         constraint_id = p.createConstraint(robot_id[parent_body],
-                                                           link_name_to_index[robot_name][parent_link],
+                                                           link_name_to_index[parent_body][parent_link],
                                                            robot_id[child_body],
-                                                           link_name_to_index[robot_name][child_link],
+                                                           link_name_to_index[child_body][child_link],
                                                            p.JOINT_PRISMATIC,
                                                            axis,
                                                            parent_frame_position,
@@ -464,9 +626,9 @@ def main():
                                                            child_frame_orientation)
                     elif (type == 'fixed'):
                         constraint_id = p.createConstraint(robot_id[parent_body],
-                                                           link_name_to_index[robot_name][parent_link],
+                                                           link_name_to_index[parent_body][parent_link],
                                                            robot_id[child_body],
-                                                           link_name_to_index[robot_name][child_link],
+                                                           link_name_to_index[child_body][child_link],
                                                            p.JOINT_FIXED,
                                                            axis,
                                                            parent_frame_position,
@@ -475,9 +637,9 @@ def main():
                                                            child_frame_orientation)
                     elif (type == 'point2point'):
                         constraint_id = p.createConstraint(robot_id[parent_body],
-                                                           link_name_to_index[robot_name][parent_link],
+                                                           link_name_to_index[parent_body][parent_link],
                                                            robot_id[child_body],
-                                                           link_name_to_index[robot_name][child_link],
+                                                           link_name_to_index[child_body][child_link],
                                                            p.JOINT_POINT2POINT,
                                                            axis,
                                                            parent_frame_position,
@@ -486,9 +648,9 @@ def main():
                                                            child_frame_orientation)
                     elif (type == 'gear'):
                         constraint_id = p.createConstraint(robot_id[parent_body],
-                                                           link_name_to_index[robot_name][parent_link],
+                                                           link_name_to_index[parent_body][parent_link],
                                                            robot_id[child_body],
-                                                           link_name_to_index[robot_name][child_link],
+                                                           link_name_to_index[child_body][child_link],
                                                            p.JOINT_GEAR,
                                                            axis,
                                                            parent_frame_position,
@@ -496,57 +658,142 @@ def main():
                                                            parent_frame_orientation,
                                                            child_frame_orientation)
                     else:
-                        print(bcolors.FAIL + 'Constraint type not foud' + bcolors.ENDC)
+                        red_p('Constraint type not foud')
                         raise SystemExit
                     if (type == 'gear'):
                         gear_constraint_to_joint[constraint_id] = p.getJointInfo(robot_id[child_body], link_name_to_index[child_body][child_link])[1].decode('UTF-8')
                         print(gear_constraint_to_joint)
                         if 'gear_ratio' in constraint:
                             gear_ratio = constraint['gear_ratio']
-                            print(bcolors.OKGREEN + '      gear_ratio: ' + str(gear_ratio) + bcolors.ENDC)
+                            green_p('      gear_ratio: ' + str(gear_ratio))
                             p.changeConstraint(constraint_id, gearRatio=gear_ratio)
                         else:
-                            print(bcolors.WARNING + '      gear_ratio: not set. Default:1' + bcolors.ENDC)
+                            yellow_p('      gear_ratio: not set. Default:1')
                             p.changeConstraint(constraint_id, gearRatio=1)
                         if 'erp' in constraint:
                             erp_var = constraint['erp']
-                            print(bcolors.OKGREEN + '      erp: ' + str(erp_var) + bcolors.ENDC)
+                            green_p('      erp: ' + str(erp_var))
                             p.changeConstraint(constraint_id, erp=erp_var)
                         else:
-                            print(bcolors.WARNING + '      erp: not set. Default:1' + bcolors.ENDC)
+                            yellow_p('      erp: not set. Default:1')
                             p.changeConstraint(constraint_id, erp=1)
                         if (type == 'gear'):
                             if 'gear_aux_link' in constraint:
                                 gear_aux_link = constraint['gear_aux_link']
-                                print(bcolors.OKGREEN + '      gear_aux_link: ' + str(gear_aux_link) + bcolors.ENDC)
+                                green_p('      gear_aux_link: ' + str(gear_aux_link))
                                 p.changeConstraint(constraint_id, gearAuxLink=link_name_to_index[robot_name][gear_aux_link])
                         else:
-                            print(bcolors.WARNING + '      gear_aux_link: not set.' + bcolors.ENDC)
+                            yellow_p('      gear_aux_link: not set.')
                     if 'max_force' in constraint:
                         max_force = constraint['max_force']
-                        print(bcolors.OKGREEN + '      max_force: ' + str(max_force) + bcolors.ENDC)
+                        green_p('      max_force: ' + str(max_force))
                         p.changeConstraint(constraint_id, maxForce=max_force)
                     else:
-                        print(bcolors.WARNING + '      max_force: not set. Default:100' + bcolors.ENDC)
+                        yellow_p('      max_force: not set. Default:100')
                         p.changeConstraint(constraint_id, maxForce=100)
             else:
-                print(bcolors.WARNING + 'No param /' + robot_name + '/constraints' + bcolors.ENDC)
+                yellow_p('No param /' + robot_name + '/constraints')
+
+            if 'sensors' in robot_info:
+                sensors = robot_info['sensors']
+                if not (isinstance(sensors, list)):
+                    yellow_p('Param /' + robot_name + '/sensors is not a list')
+                else:
+                    sw_publishers[robot_name] = {}
+                    sensor_offset[robot_name] = {}
+                    for sensor in sensors:
+                        p.enableJointForceTorqueSensor(robot_id[robot_name], joint_name_to_index[robot_name][sensor], enableSensor=1)
+                        sw_publishers[robot_name][sensor] = rospy.Publisher('/' + robot_name + '/' + sensor + '/wrench', WrenchStamped, queue_size=1)
+                        sensor_offset[robot_name][sensor] = [0, 0, 0, 0, 0, 0]
+            else:
+                yellow_p('No param /' + robot_name + '/sensors')
+
+            if 'link_dynamics' in robot_info:
+                links_dyn = robot_info['link_dynamics']
+                green_p('  link dynamics: ')
+                for link_dyn in links_dyn:
+                    if 'link_name' in link_dyn:
+                        link_name = link_dyn['link_name']
+                        green_p('    - link_name: ' + link_name)
+                    else:
+                        red_p('No param /' + robot_name + '/link_dynamics/link_name')
+                        raise SystemExit
+                    current_dyn_info = p.getDynamicsInfo(robot_id[robot_name], link_name_to_index[robot_name][link_name])
+                    if 'lateral_friction' in link_dyn:
+                        lateral_friction = link_dyn['lateral_friction']
+                        green_p('      lateral_friction: ' + str(lateral_friction))
+                    else:
+                        lateral_friction = current_dyn_info[1]
+                        yellow_p('No param /' + robot_name + '/link_dynamics/lateral_friction, current value:' + str(lateral_friction))
+                    if 'spinning_friction' in link_dyn:
+                        spinning_friction = link_dyn['spinning_friction']
+                        green_p('      spinning_friction: ' + str(spinning_friction))
+                    else:
+                        spinning_friction = current_dyn_info[7]
+                        yellow_p('No param /' + robot_name + '/link_dynamics/spinning_friction, current value:' + str(spinning_friction))
+                    if 'rolling_friction' in link_dyn:
+                        rolling_friction = link_dyn['rolling_friction']
+                        green_p('      rolling_friction: ' + str(rolling_friction))
+                    else:
+                        rolling_friction = current_dyn_info[6]
+                        yellow_p('No param /' + robot_name + '/link_dynamics/rolling_friction, current value:' + str(rolling_friction))
+                    if 'contact_stiffness' in link_dyn:
+                        contact_stiffness = link_dyn['contact_stiffness']
+                        green_p('      contact_stiffness: ' + str(contact_stiffness))
+                    else:
+                        contact_stiffness = current_dyn_info[9]
+                        yellow_p('No param /' + robot_name + '/link_dynamics/contact_stiffness, current value:' + str(contact_stiffness))
+                    if 'contact_damping' in link_dyn:
+                        contact_damping = link_dyn['contact_damping']
+                        green_p('      contact_damping: ' + str(contact_damping))
+                    else:
+                        contact_damping = current_dyn_info[8]
+                        yellow_p('No param /' + robot_name + '/link_dynamics/contact_damping, current value:' + str(contact_damping))
+                    if 'linear_damping' in link_dyn:
+                        linear_damping = link_dyn['linear_damping']
+                        green_p('      linear_damping: ' + str(linear_damping))
+                    else:
+                        linear_damping = 0.4
+                        yellow_p('No param /' + robot_name + '/link_dynamics/linear_damping, current value:' + str(linear_damping))
+                    if 'angular_damping' in link_dyn:
+                        angular_damping = link_dyn['angular_damping']
+                        green_p('      angular_damping: ' + str(angular_damping))
+                    else:
+                        angular_damping = 0.4
+                        yellow_p('No param /' + robot_name + '/link_dynamics/angular_damping' + str(angular_damping))
+                        raise SystemExit
+                    if 'friction_anchor' in link_dyn:
+                        friction_anchor = link_dyn['friction_anchor']
+                        green_p('      friction_anchor: ' + str(friction_anchor))
+                    else:
+                        friction_anchor = 0
+                        yellow_p('No param /' + robot_name + '/link_dynamics/friction_anchor' + str(friction_anchor))
+                    p.changeDynamics(robot_id[robot_name], link_name_to_index[robot_name][link_name],
+                                     lateralFriction=lateral_friction,
+                                     spinningFriction=spinning_friction,
+                                     rollingFriction=rolling_friction,
+                                     contactStiffness=contact_stiffness,
+                                     contactDamping=contact_damping,
+                                     linearDamping=linear_damping,
+                                     angularDamping=angular_damping,
+                                     frictionAnchor=friction_anchor)
+
             if 'joint_control_mode' in robot_info:
                 joint_control_mode[robot_name] = robot_info['joint_control_mode']
-                print(bcolors.OKGREEN + '  joint_control_mode: ' + joint_control_mode[robot_name] + bcolors.ENDC)
+                green_p('  joint_control_mode: ' + joint_control_mode[robot_name])
             else:
-                print(bcolors.FAIL + 'No param /' + robot_name + '/joint_control_mode' + bcolors.ENDC)
+                red_p('No param /' + robot_name + '/joint_control_mode')
                 raise SystemExit
 
             jt_topic = '/' + robot_name + '/joint_target'
-#            rospy.Subscriber(jt_topic, JointState, jointTargetSubscriber, (robot_id[robot_name], joint_name_to_index[robot_name], joint_control_mode[robot_name], controlled_joint_name[robot_name]), queue_size=1)
-            rospy.Subscriber(jt_topic, JointState,
-                             lambda msg: jointTargetSubscriber(msg,
-                                                               robot_id[robot_name],
-                                                               joint_name_to_index[robot_name],
-                                                               joint_control_mode[robot_name],
-                                                               controlled_joint_name[robot_name]),
-                             queue_size=1)
+
+            jt_pubishers[robot_name] = JointTargetSubscriber(robot_id,
+                                                             joint_name_to_index,
+                                                             joint_control_mode,
+                                                             controlled_joint_name,
+                                                             robot_name,
+                                                             jt_topic,
+                                                             control_mode_lock)
 
             joint_states[robot_name] = p.getJointStates(robot_id[robot_name], range(p.getNumJoints(robot_id[robot_name])))
             for joint_name in joint_name_to_index[robot_name].keys():
@@ -555,14 +802,14 @@ def main():
                         p.setJointMotorControl2(robot_id[robot_name],
                                                 joint_name_to_index[robot_name][joint_name],
                                                 p.POSITION_CONTROL,
-                                                targetPosition=0.0)
-                        print(bcolors.OKCYAN + joint_name + ' joint set with position control, target position = 0.0' + bcolors.ENDC)
+                                                targetPosition=start_configuration[joint_name])
+                        cyan_p(joint_name + ' joint set with position control, target position = 0.0')
                     elif (joint_control_mode[robot_name] == 'velocity'):
                         p.setJointMotorControl2(robot_id[robot_name],
                                                 joint_name_to_index[robot_name][joint_name],
                                                 p.VELOCITY_CONTROL,
                                                 targetVelocity=0.0)
-                        print(bcolors.OKCYAN + joint_name + ' joint set with velocity control, target velocity = 0.0' + bcolors.ENDC)
+                        cyan_p(joint_name + ' joint set with velocity control, target velocity = 0.0')
                     elif (joint_control_mode[robot_name] == 'torque'):
                         p.setJointMotorControl2(robot_id[robot_name],
                                                 joint_name_to_index[robot_name][joint_name],
@@ -572,56 +819,279 @@ def main():
                                                 joint_name_to_index[robot_name][joint_name],
                                                 p.TORQUE_CONTROL,
                                                 force=0.0)
-                        print(bcolors.OKCYAN + joint_name + ' joint set with torque control, target force = 0.0' + bcolors.ENDC)
-#                    elif (joint_control_mode[robot_name] == 'pd'):
-#                        p.setJointMotorControl2(robot_id[robot_name],
-#                                                joint_name_to_index[robot_name][joint_name],
-#                                                p.PD_CONTROL)
+                        cyan_p(joint_name + ' joint set with torque control, target force = 0.0')
                     else:
-                        print(bcolors.FAIL + '/' + robot_name + '/joint_control_mode not in existing types' + bcolors.ENDC)
+                        red_p('/' + robot_name + '/joint_control_mode not in existing types')
                         raise SystemExit
                 else:
                     p.setJointMotorControl2(robot_id[robot_name],
                                             joint_name_to_index[robot_name][joint_name],
                                             p.VELOCITY_CONTROL,
                                             force=0.0)
-                    print(bcolors.OKGREEN + joint_name + ' joint set with velocity control, max force = 0.0' + bcolors.ENDC)
+                    green_p(joint_name + ' joint set with velocity control, max force = 0.0')
         else:
-            print(bcolors.FAIL + '/' + robot_name + ' param not found' + bcolors.ENDC)
+            red_p('/' + robot_name + ' param not found')
             raise SystemExit
 
-    rospy.Service('change_control_mode', ChangeControlMode, lambda msg: change_control_mode(msg, robot_id, joint_name_to_index, controlled_joint_name, joint_control_mode, joint_effort_limits))
+    if rospy.has_param('external_constraint'):
+        green_p('External constraints: ')
+        constraints = rospy.get_param('external_constraint')
+        if isinstance(constraints, list):
+            for constraint in constraints:
+                if not isinstance(constraint, dict):
+                    red_p('Single constraint is not a dictionary')
+                    raise SystemExit
+                if 'parent_body' in constraint:
+                    parent_body = constraint['parent_body']
+                    green_p('    - parent_body: ' + parent_body)
+                else:
+                    red_p('No param /' + robot_name + '/constraint/parent_body')
+                    raise SystemExit
+                if 'parent_link' in constraint:
+                    parent_link = constraint['parent_link']
+                    green_p('      parent_link: ' + parent_link)
+                else:
+                    print('No param /' + robot_name + '/constraint/parent_link')
+                    red_p('No /robots param')
+                    raise SystemExit
+                if 'child_body' in constraint:
+                    child_body = constraint['child_body']
+                    green_p('      child_body: ' + child_body)
+                else:
+                    red_p('No param /' + robot_name + '/constraint/child_body')
+                    raise SystemExit
+                if 'child_link' in constraint:
+                    child_link = constraint['child_link']
+                    green_p('      child_link: ' + child_link)
+                else:
+                    red_p('No param /' + robot_name + '/constraint/child_link')
+                    raise SystemExit
+                if 'type' in constraint:
+                    type = constraint['type']
+                    green_p('      type: ' + type)
+                else:
+                    red_p('No param /' + robot_name + '/constraint/type')
+                    raise SystemExit
+                if 'axis' in constraint:
+                    axis = constraint['axis']
+                    green_p('      axis: [' +
+                            str(axis[0]) + ',' +
+                            str(axis[1]) + ',' +
+                            str(axis[2]) + ']')
+                else:
+                    red_p('No param /' + robot_name + '/constraint/axis')
+                    raise SystemExit
+                if 'parent_frame_position' in constraint:
+                    parent_frame_position = constraint['parent_frame_position']
+                    green_p('      parent_frame_position: [' +
+                            str(parent_frame_position[0]) + ',' +
+                            str(parent_frame_position[1]) + ',' +
+                            str(parent_frame_position[2]) + ']')
+                else:
+                    red_p('No param /' + robot_name + '/constraint/parent_frame_position')
+                    raise SystemExit
+                if 'child_frame_position' in constraint:
+                    child_frame_position = constraint['child_frame_position']
+                    green_p('      child_frame_position: [' +
+                            str(child_frame_position[0]) + ',' +
+                            str(child_frame_position[1]) + ',' +
+                            str(child_frame_position[2]) + ']')
+                else:
+                    red_p('No param /' + robot_name + '/constraint/child_frame_position')
+                    raise SystemExit
+                if 'parent_frame_orientation' in constraint:
+                    parent_frame_orientation = constraint['parent_frame_orientation']
+                    green_p('      parent_frame_orientation: [' +
+                            str(parent_frame_orientation[0]) + ',' +
+                            str(parent_frame_orientation[1]) + ',' +
+                            str(parent_frame_orientation[2]) + ',' +
+                            str(parent_frame_orientation[3]) + ']')
+                else:
+                    red_p('No param /' + robot_name + '/constraint/parent_frame_orientation')
+                    raise SystemExit
+                if 'child_frame_orientation' in constraint:
+                    child_frame_orientation = constraint['child_frame_orientation']
+                    green_p('      child_frame_orientation: [' +
+                            str(child_frame_orientation[0]) + ',' +
+                            str(child_frame_orientation[1]) + ',' +
+                            str(child_frame_orientation[2]) + ',' +
+                            str(child_frame_orientation[3]) + ']')
+                else:
+                    red_p('No param /' + robot_name + '/constraint/child_frame_orientation')
+                    raise SystemExit
+                if (type == 'prismatic'):
+                    constraint_id = p.createConstraint(robot_id[parent_body],
+                                                       link_name_to_index[parent_body][parent_link],
+                                                       robot_id[child_body],
+                                                       link_name_to_index[child_body][child_link],
+                                                       p.JOINT_PRISMATIC,
+                                                       axis,
+                                                       parent_frame_position,
+                                                       child_frame_position,
+                                                       parent_frame_orientation,
+                                                       child_frame_orientation)
+                elif (type == 'fixed'):
+                    constraint_id = p.createConstraint(robot_id[parent_body],
+                                                       link_name_to_index[parent_body][parent_link],
+                                                       robot_id[child_body],
+                                                       link_name_to_index[child_body][child_link],
+                                                       p.JOINT_FIXED,
+                                                       axis,
+                                                       parent_frame_position,
+                                                       child_frame_position,
+                                                       parent_frame_orientation,
+                                                       child_frame_orientation)
+                elif (type == 'point2point'):
+                    constraint_id = p.createConstraint(robot_id[parent_body],
+                                                       link_name_to_index[parent_body][parent_link],
+                                                       robot_id[child_body],
+                                                       link_name_to_index[child_body][child_link],
+                                                       p.JOINT_POINT2POINT,
+                                                       axis,
+                                                       parent_frame_position,
+                                                       child_frame_position,
+                                                       parent_frame_orientation,
+                                                       child_frame_orientation)
+                elif (type == 'gear'):
+                    constraint_id = p.createConstraint(robot_id[parent_body],
+                                                       link_name_to_index[parent_body][parent_link],
+                                                       robot_id[child_body],
+                                                       link_name_to_index[child_body][child_link],
+                                                       p.JOINT_GEAR,
+                                                       axis,
+                                                       parent_frame_position,
+                                                       child_frame_position,
+                                                       parent_frame_orientation,
+                                                       child_frame_orientation)
+                else:
+                    red_p('Constraint type not foud')
+                    raise SystemExit
+                if (type == 'gear'):
+                    gear_constraint_to_joint[constraint_id] = p.getJointInfo(robot_id[child_body], link_name_to_index[child_body][child_link])[1].decode('UTF-8')
+                    print(gear_constraint_to_joint)
+                    if 'gear_ratio' in constraint:
+                        gear_ratio = constraint['gear_ratio']
+                        green_p('      gear_ratio: ' + str(gear_ratio))
+                        p.changeConstraint(constraint_id, gearRatio=gear_ratio)
+                    else:
+                        yellow_p('      gear_ratio: not set. Default:1')
+                        p.changeConstraint(constraint_id, gearRatio=1)
+                    if 'erp' in constraint:
+                        erp_var = constraint['erp']
+                        green_p('      erp: ' + str(erp_var))
+                        p.changeConstraint(constraint_id, erp=erp_var)
+                    else:
+                        yellow_p('      erp: not set. Default:1')
+                        p.changeConstraint(constraint_id, erp=1)
+                    if (type == 'gear'):
+                        if 'gear_aux_link' in constraint:
+                            gear_aux_link = constraint['gear_aux_link']
+                            green_p('      gear_aux_link: ' + str(gear_aux_link))
+                            p.changeConstraint(constraint_id, gearAuxLink=link_name_to_index[robot_name][gear_aux_link])
+                    else:
+                        yellow_p('      gear_aux_link: not set.')
+                if 'max_force' in constraint:
+                    max_force = constraint['max_force']
+                    green_p('      max_force: ' + str(max_force))
+                    p.changeConstraint(constraint_id, maxForce=max_force)
+                else:
+                    yellow_p('      max_force: not set. Default:100')
+                    p.changeConstraint(constraint_id, maxForce=100)
+        else:
+            red_p('external_constraint is not a list')
+    else:
+        yellow_p('No external constraint')
 
-    rate = rospy.Rate(1 / desidered_real_step_time)
+    rospy.Service('change_control_mode',
+                  ChangeControlMode,
+                  lambda msg:
+                      change_control_mode(msg,
+                                          robot_id,
+                                          joint_name_to_index,
+                                          controlled_joint_name,
+                                          joint_control_mode,
+                                          joint_effort_limits,
+                                          control_mode_lock))
+
+    rospy.Service('pybullet_save_state',
+                  SaveState,
+                  lambda msg: save_state(msg, state_id))
+
+    rospy.Service('pybullet_restore_state',
+                  RestoreState,
+                  lambda msg: restore_state(msg, state_id))
+
+    rospy.Service('pybullet_delete_state',
+                  DeleteState,
+                  lambda msg: delete_state(msg, state_id))
+    rospy.Service('pybullet_sensor_reset',
+                  SensorReset,
+                  lambda msg: sensor_reset(msg,
+                                           robot_id,
+                                           sw_publishers,
+                                           joint_name_to_index,
+                                           sensor_offset,
+                                           sensor_offset_lock))
+
     time_pub = rospy.Publisher('/clock', Clock, queue_size=10)
-    real_time = rospy.Time.to_sec(rospy.Time.now())
+#    real_time = rospy.Time.to_sec(rospy.Time.now())
 
     p.setTimeStep(simulation_step_time)
     p.stepSimulation()                 #
-    simulation_time = simulation_step_time
-    simulation_time_msg = rospy.Time(simulation_time)
+    simulation_time = []
+    simulation_time.append(simulation_step_time)
+    simulation_time_msg = rospy.Time(simulation_time[0])
     time_pub.publish(simulation_time_msg)
 
-    js_pub_thread = Thread(target=jointStatePublisher, args=(robot_id, js_publishers, joint_states, joint_state_publish_rate, joint_name_to_index, gear_constraint_to_joint))
+    js_pub_thread = Thread(target=joint_state_publisher, args=(robot_id,
+                                                               js_publishers,
+                                                               joint_states,
+                                                               joint_state_publish_rate,
+                                                               joint_name_to_index,
+                                                               gear_constraint_to_joint))
     js_pub_thread.start()
 
+    sw_pub_thread = Thread(target=sensor_wrench_publisher, args=(robot_id,
+                                                                 sw_publishers,
+                                                                 joint_name_to_index,
+                                                                 joint_state_publish_rate,
+                                                                 sensor_offset,
+                                                                 sensor_offset_lock))
+
+    sw_pub_thread.start()
+
+    tf_pub_thread = Thread(target=tf_publisher, args=(model_id, ))
+    tf_pub_thread.start()
+
+    time.sleep(0.1)
+
+    cyan_p('Ready for simulation')
+    now = time.time()
     while not rospy.is_shutdown():
         p.stepSimulation()
-        simulation_time += simulation_step_time
-        simulation_time_msg = rospy.Time(simulation_time)
+        simulation_time[0] += simulation_step_time
+        simulation_time_msg = rospy.Time(simulation_time[0])
         time_pub.publish(simulation_time_msg)
-        real_step_time = rospy.Time.to_sec(rospy.Time.now()) - real_time
-        rate.sleep()
-        real_time = rospy.Time.to_sec(rospy.Time.now())
-        if (real_step_time > desidered_real_step_time):
-            print(bcolors.WARNING + str(real_step_time) + bcolors.ENDC)
-        if (real_step_time > simulation_step_time):
-            print(bcolors.FAIL + str(real_step_time) + bcolors.ENDC)
-    p.disconnect()
-    rospy.set_param('use_sim_time', False)
+        elapsed = time.time() - now
+        if (desidered_real_step_time - elapsed > 0):
+            time.sleep(desidered_real_step_time - elapsed)
+#        else:
+#            red_p('Step time exceeded: ' + str(abs(desidered_real_step_time - elapsed)))
+        now = time.time()
+#        real_step_time = rospy.Time.to_sec(rospy.Time.now()) - real_time
+#        real_time = rospy.Time.to_sec(rospy.Time.now())
+#        if (real_step_time > desidered_real_step_time):
+#            yellow_p(str(real_step_time))
+#        if (real_step_time > simulation_step_time):
+#            red_p(str(real_step_time))
 
-    print(bcolors.OKGREEN + 'Waiting for the thread...' + bcolors.ENDC)
+    p.saveBullet('initial_state')
+
+    p.disconnect()
+
+    green_p('Waiting for threads...')
     js_pub_thread.join()
+    tf_pub_thread.join()
 
 
 if __name__ == '__main__':

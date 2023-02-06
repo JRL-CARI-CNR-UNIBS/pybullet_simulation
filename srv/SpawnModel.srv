@@ -1,3 +1,5 @@
-string[] models_names
+string[] object_name
+string[] model_name
+geometry_msgs/Pose[] pose
 ---
 string result
