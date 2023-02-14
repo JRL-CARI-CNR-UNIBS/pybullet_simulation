@@ -1,6 +1,7 @@
 coke_can:
   foulder_path: '/home/gauss/projects/personal_ws/src/pybullet_utils/urdf'
   urdf_file_name: 'coke_can'
+  rviz_param: {mesh: "package://pybullet_utils/meshes/coke_can.dae", scale: [1, 1, 1]}
 
 sphere:
   foulder_path: '/home/gauss/projects/personal_ws/src/pybullet_utils/urdf'

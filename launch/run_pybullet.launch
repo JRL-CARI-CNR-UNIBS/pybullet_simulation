@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <launch>
-  <rosparam command="load" file="$(find pybullet_utils)/config/object_model_param.yaml"/>
+  <include file="$(find pybullet_utils)/launch/load_object_model_params.launch" />
   <param name="use_sim_time" type="bool" value="true"/>
   <node name="pybullet_simulation" pkg="pybullet_utils" type="pybullet_simulation.py" output="screen"/>
 </launch>

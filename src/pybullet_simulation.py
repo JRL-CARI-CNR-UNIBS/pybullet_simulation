@@ -12,6 +12,7 @@ from std_msgs.msg import Header
 from threading import Thread
 from threading import Lock
 from rosgraph_msgs.msg import Clock
+#from visualization_msgs import Marker
 from pybullet_utils.srv import SpawnModel
 from pybullet_utils.srv import DeleteModel
 from pybullet_utils.srv import ChangeControlMode
@@ -365,6 +366,7 @@ def main():
         green_p(' - ' + js_topic)
 
     physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
+#    physicsClient = p.connect(p.DIRECT)  # or p.GUI for graphical version
 
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     planeId = p.loadURDF("plane.urdf")
@@ -1078,6 +1080,7 @@ def main():
 #        green_p(str(1 / elapsed))
         if (desidered_real_step_time - elapsed > 0):
             time.sleep(desidered_real_step_time - elapsed)
+        print('Time ratio: ' + str(simulation_step_time / (time.time() - now)))
         now = time.time()
 
     p.disconnect()
