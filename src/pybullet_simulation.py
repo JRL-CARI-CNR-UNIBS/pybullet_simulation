@@ -4,6 +4,7 @@ import os
 import pybullet as p
 import pybullet_data
 import rospy
+import rospkg
 import tf
 import time
 from geometry_msgs.msg import WrenchStamped
@@ -12,7 +13,6 @@ from std_msgs.msg import Header
 from threading import Thread
 from threading import Lock
 from rosgraph_msgs.msg import Clock
-#from visualization_msgs import Marker
 from pybullet_utils.srv import SpawnModel
 from pybullet_utils.srv import DeleteModel
 from pybullet_utils.srv import ChangeControlMode
@@ -138,13 +138,29 @@ def spawn_model(srv, model_id):
         green_p('You want to spawn a ' + model_name + ' with the name ' + object_name)
         if rospy.has_param(model_name):
             model_info = rospy.get_param(model_name)
-            if 'foulder_path' in model_info:
-                foulder_path = model_info['foulder_path']
-                p.setAdditionalSearchPath(model_info['foulder_path'])
+            if 'package_name' in model_info:
+                package_name = model_info['package_name']
+                rospack = rospkg.RosPack()
+                foulder_path = rospack.get_path(package_name)
+                green_p('  package_path: ' + foulder_path)
+            else:
+                red_p('No param /' + model_name + '/package_name')
+                raise SystemExit
+            if 'foulder_name' in model_info:
+                foulder_name = model_info['foulder_name']
+                foulder_path += '/' + foulder_name
+                p.setAdditionalSearchPath(foulder_path)
                 green_p('  foulder_path: ' + foulder_path)
             else:
-                red_p('No param /' + model_name + '/foulder_path')
-                return 'false'
+                red_p('No param /' + model_name + '/package_name')
+                raise SystemExit
+#            if 'foulder_path' in model_info:
+#                foulder_path = model_info['foulder_path']
+#                p.setAdditionalSearchPath(model_info['foulder_path'])
+#                green_p('  foulder_path: ' + foulder_path)
+#            else:
+#                red_p('No param /' + model_name + '/foulder_path')
+#                return 'false'
             if 'urdf_file_name' in model_info:
                 file_type = 'urdf'
                 file_name = model_info['urdf_file_name']
@@ -416,15 +432,26 @@ def main():
         green_p('For robot ' + robot_name + ':')
         if rospy.has_param('/' + robot_name):
             robot_info = rospy.get_param('/' + robot_name)
+            green_p(' All parameter:')
+            green_p('   {')
             for key in robot_info.keys():
-                green_p(key + ': ' + str(robot_info[key]))
-
-            if 'foulder_path' in robot_info:
-                foulder_path = robot_info['foulder_path']
-                p.setAdditionalSearchPath(robot_info['foulder_path'])
+                green_p('    ' + key + ': ' + str(robot_info[key]))
+            green_p('   }')
+            if 'package_name' in robot_info:
+                package_name = robot_info['package_name']
+                rospack = rospkg.RosPack()
+                foulder_path = rospack.get_path(package_name)
+                green_p('  package_path: ' + foulder_path)
+            else:
+                red_p('No param /' + robot_name + '/package_name')
+                raise SystemExit
+            if 'foulder_name' in robot_info:
+                foulder_name = robot_info['foulder_name']
+                foulder_path += '/' + foulder_name
+                p.setAdditionalSearchPath(foulder_path)
                 green_p('  foulder_path: ' + foulder_path)
             else:
-                red_p('No param /' + robot_name + '/foulder_path')
+                red_p('No param /' + robot_name + '/package_name')
                 raise SystemExit
             if 'urdf_file_name' in robot_info:
                 file_type = 'urdf'
@@ -451,7 +478,8 @@ def main():
                 green_p('  start_orientation: [' +
                         str(start_orientation[0]) + ',' +
                         str(start_orientation[1]) + ',' +
-                        str(start_orientation[2]) + ']')
+                        str(start_orientation[2]) + ',' +
+                        str(start_orientation[3]) + ']')
             else:
                 red_p('No param /' + robot_name + '/start_orientation')
                 raise SystemExit
@@ -1080,7 +1108,7 @@ def main():
 #        green_p(str(1 / elapsed))
         if (desidered_real_step_time - elapsed > 0):
             time.sleep(desidered_real_step_time - elapsed)
-        print('Time ratio: ' + str(simulation_step_time / (time.time() - now)))
+#        print('Time ratio: ' + str(simulation_step_time / (time.time() - now)))
         now = time.time()
 
     p.disconnect()
