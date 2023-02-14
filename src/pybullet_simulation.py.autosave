@@ -366,9 +366,6 @@ def main():
 
     physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
 
-#    p.setPhysicsEngineParameter(enableSAT=1)
-#    p.setVRCameraState(rootPosition=[1,1,1], rootOrientation=[0,0,0,1])
-
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     planeId = p.loadURDF("plane.urdf")
     p.setGravity(0, 0, -9.8)
