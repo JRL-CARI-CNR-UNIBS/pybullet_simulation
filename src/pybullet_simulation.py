@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import sys
 import os
 import pybullet as p
 import pybullet_data
@@ -7,11 +8,13 @@ import rospy
 import rospkg
 import tf
 import time
-from geometry_msgs.msg import WrenchStamped
+import copy
+from geometry_msgs.msg import WrenchStamped, PoseStamped
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
 from threading import Thread
 from threading import Lock
+from moveit_commander import PlanningSceneInterface
 from rosgraph_msgs.msg import Clock
 from pybullet_utils.srv import SpawnModel
 from pybullet_utils.srv import DeleteModel
@@ -119,7 +122,9 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
     return 'true'
 
 
-def spawn_model(srv, model_id):
+def spawn_model(srv, model_id, model_mesh, model_mesh_offset, tf_pub_thread, use_rviz):
+    if tf_pub_thread.is_alive() is False:
+        tf_pub_thread.start()
     if not srv.model_name:
         red_p('Name list is empty')
         return 'false'
@@ -138,65 +143,94 @@ def spawn_model(srv, model_id):
         green_p('You want to spawn a ' + model_name + ' with the name ' + object_name)
         if rospy.has_param(model_name):
             model_info = rospy.get_param(model_name)
+
             if 'package_name' in model_info:
                 package_name = model_info['package_name']
                 rospack = rospkg.RosPack()
-                foulder_path = rospack.get_path(package_name)
-                green_p('  package_path: ' + foulder_path)
+                folder_path = rospack.get_path(package_name)
+                green_p('  package_path: ' + folder_path)
             else:
                 red_p('No param /' + model_name + '/package_name')
                 raise SystemExit
-            if 'foulder_name' in model_info:
-                foulder_name = model_info['foulder_name']
-                foulder_path += '/' + foulder_name
-                p.setAdditionalSearchPath(foulder_path)
-                green_p('  foulder_path: ' + foulder_path)
-            else:
-                red_p('No param /' + model_name + '/package_name')
-                raise SystemExit
-#            if 'foulder_path' in model_info:
-#                foulder_path = model_info['foulder_path']
-#                p.setAdditionalSearchPath(model_info['foulder_path'])
-#                green_p('  foulder_path: ' + foulder_path)
-#            else:
-#                red_p('No param /' + model_name + '/foulder_path')
-#                return 'false'
-            if 'urdf_file_name' in model_info:
+            if 'urdf_file_path' in model_info:
                 file_type = 'urdf'
-                file_name = model_info['urdf_file_name']
-                green_p('  urdf_file_name: ' + file_name)
-            elif 'xacro_file_name' in model_info:
+                urdf_file_path = model_info['urdf_file_path']
+                green_p('  urdf_file_path: ' + urdf_file_path)
+                urdf_path = folder_path + '/' + urdf_file_path
+                if (urdf_path.find('.urdf') == -1):
+                    red_p('  urdf_file_path do not has extension .urdf')
+                    raise SystemExit
+            elif 'xacro_file_path' in model_info:
                 file_type = 'xacro'
-                file_name = model_info['xacro_file_name']
-                green_p('  xacro_file_name: ' + file_name)
+                xacro_file_path = model_info['xacro_file_path']
+                green_p('  xacro_file_name: ' + xacro_file_path)
+                xacro_path = folder_path + '/' + xacro_file_path
+                if (xacro_path.find('.xacro') != -1):
+                    urdf_path = xacro_path.replace('.xacro', '.urdf')
+                else:
+                    red_p('  xacro_file_path do not has extension .xacro')
+                    raise SystemExit
             else:
-                red_p('No param /' + model_name + '/xacro_file_name(or urdf_file_name)')
-                return 'false'
+                red_p('No param /' + model_name + '/xacro_file_path(or urdf_file_path)')
+                raise SystemExit
+            if (use_rviz == 'true'):
+                if 'mesh_file_path' in model_info:
+                    mesh_file_path = model_info['mesh_file_path']
+                    green_p('  mesh_file_path: ' + mesh_file_path)
+                    mesh_path = folder_path + '/' + mesh_file_path
+                else:
+                    red_p('No param /' + model_name + '/mesh_file_path')
+                    raise SystemExit
+                if 'mesh_position_offset' in model_info:
+                    mesh_position_offset = model_info['mesh_position_offset']
+                    green_p('  mesh_position_offset: ' + str(mesh_position_offset))
+                else:
+                    red_p('No param /' + model_name + '/mesh_position_offset')
+                    raise SystemExit
+                if 'mesh_orientation_offset' in model_info:
+                    mesh_orientation_offset = model_info['mesh_orientation_offset']
+                    green_p('  mesh_orientation_offset: ' + str(mesh_orientation_offset))
+                else:
+                    red_p('No param /' + model_name + '/mesh_orientation_offset')
+                    raise SystemExit
         else:
             red_p('Model param not found')
             return 'false'
         if (file_type == 'xacro'):
-            xacro_file_name = foulder_path + '/' + file_name + '.xacro'
-            urdf_file_name = foulder_path + '/' + file_name + '.urdf'
-            os.system('rosrun xacro xacro ' + xacro_file_name + ' > ' + urdf_file_name)
+            os.system('rosrun xacro xacro ' + xacro_path + ' > ' + urdf_path)
 
         start_pos = [pose.position.x, pose.position.y, pose.position.z]
         start_orientation = [pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]
-        file_name += '.urdf'
-        model_id[object_name] = p.loadURDF(file_name, start_pos, start_orientation, 0, 0, flags=p.URDF_USE_INERTIA_FROM_FILE)
+        model_id[object_name] = p.loadURDF(urdf_path, start_pos, start_orientation, 0, 0, flags=p.URDF_USE_INERTIA_FROM_FILE)
+        if (use_rviz == 'true'):
+            model_mesh[object_name] = mesh_path
+
+            offset = PoseStamped()
+            offset.header.frame_id = object_name
+            offset.pose.position.x = mesh_position_offset[0]
+            offset.pose.position.y = mesh_position_offset[1]
+            offset.pose.position.z = mesh_position_offset[2]
+            offset.pose.orientation.x = mesh_orientation_offset[0]
+            offset.pose.orientation.y = mesh_orientation_offset[1]
+            offset.pose.orientation.z = mesh_orientation_offset[2]
+            offset.pose.orientation.w = mesh_orientation_offset[3]
+            model_mesh_offset[object_name] = offset
 
     green_p('Model spawned')
     green_p(str(model_id))
     return 'true'
 
 
-def delete_model(srv, model_id):
+def delete_model(srv, model_id, model_mesh, model_mesh_offset, use_rviz):
     for object_name in srv.object_name:
         if object_name not in model_id.keys():
             yellow_p(object_name + ' is not in the scene')
             continue
         id = model_id[object_name]
         del model_id[object_name]
+        if (use_rviz == 'true'):
+            del model_mesh[object_name]
+            del model_mesh_offset[object_name]
         p.removeBody(id)
     return 'true'
 
@@ -280,13 +314,15 @@ def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offse
     return 'true'
 
 
-def tf_publisher(model_id):
+def tf_publisher(model_id, model_mesh, model_mesh_offset, use_rviz):
     if rospy.has_param('object_tf_publish_rate'):
         tf_publish_rate = rospy.get_param('object_tf_publish_rate')
         green_p('object_tf_publish_rate: ' + str(tf_publish_rate))
     else:
         tf_publish_rate = 250
         yellow_p('object_tf_publish_rate not set, default value: ' + str(tf_publish_rate))
+    if (use_rviz == 'true'):
+        scene = PlanningSceneInterface()
     rate = rospy.Rate(tf_publish_rate)
     br = tf.TransformBroadcaster()
     current_time = rospy.Time.now().to_sec()
@@ -299,6 +335,10 @@ def tf_publisher(model_id):
                                  rospy.Time.now(),
                                  model_name,
                                  "world")
+                if (use_rviz == 'true'):
+                    scene.add_mesh(model_name + "_", model_mesh_offset[model_name], model_mesh[model_name])
+
+
             current_time = rospy.Time.now().to_sec()
         rate.sleep()
 
@@ -343,10 +383,14 @@ def main():
     control_mode_lock = Lock()
     sensor_offset_lock = Lock()
 
+    use_rviz = sys.argv[1]
+
     controlled_joint_name = {}
     gear_constraint_to_joint = {}
     robot_id = {}
     model_id = {}
+    model_mesh = {}
+    model_mesh_offset = {}
     link_name_to_index = {}
     joint_name_to_index = {}
     joint_state_publish_rate = None
@@ -427,6 +471,8 @@ def main():
         red_p('No param /joint_state_publish_rate')
         raise SystemExit
 
+    p.setAdditionalSearchPath('')
+
     for robot_name in robot_names:
         start_configuration = {}
         green_p('For robot ' + robot_name + ':')
@@ -440,29 +486,31 @@ def main():
             if 'package_name' in robot_info:
                 package_name = robot_info['package_name']
                 rospack = rospkg.RosPack()
-                foulder_path = rospack.get_path(package_name)
-                green_p('  package_path: ' + foulder_path)
+                folder_path = rospack.get_path(package_name)
+                green_p('  package_path: ' + folder_path)
             else:
                 red_p('No param /' + robot_name + '/package_name')
                 raise SystemExit
-            if 'foulder_name' in robot_info:
-                foulder_name = robot_info['foulder_name']
-                foulder_path += '/' + foulder_name
-                p.setAdditionalSearchPath(foulder_path)
-                green_p('  foulder_path: ' + foulder_path)
-            else:
-                red_p('No param /' + robot_name + '/package_name')
-                raise SystemExit
-            if 'urdf_file_name' in robot_info:
+            if 'urdf_file_path' in robot_info:
                 file_type = 'urdf'
-                file_name = robot_info['urdf_file_name']
-                green_p('  urdf_file_name: ' + file_name)
-            elif 'xacro_file_name' in robot_info:
+                urdf_file_path = robot_info['urdf_file_path']
+                green_p('  urdf_file_path: ' + urdf_file_path)
+                urdf_path = folder_path + '/' + urdf_file_path
+                if (urdf_path.find('.xacro') == -1):
+                    red_p('  urdf_file_path do not has extension .urdf')
+                    raise SystemExit
+            elif 'xacro_file_path' in robot_info:
                 file_type = 'xacro'
-                file_name = robot_info['xacro_file_name']
-                green_p('  xacro_file_name: ' + file_name)
+                xacro_file_path = robot_info['xacro_file_path']
+                green_p('  xacro_file_name: ' + xacro_file_path)
+                xacro_path = folder_path + '/' + xacro_file_path
+                if (xacro_path.find('.xacro') != -1):
+                    urdf_path = xacro_path.replace('.xacro', '.urdf')
+                else:
+                    red_p('  xacro_file_path do not has extension .xacro')
+                    raise SystemExit
             else:
-                red_p('No param /' + robot_name + '/xacro_file_name(or urdf_file_name)')
+                red_p('No param /' + robot_name + '/xacro_file_path(or urdf_file_path)')
                 raise SystemExit
             if 'start_position' in robot_info:
                 start_pos = robot_info['start_position']
@@ -513,12 +561,9 @@ def main():
                     start_configuration[controlled_joint_name[robot_name][index]] = 0.0
 
             if (file_type == 'xacro'):
-                xacro_file_name = foulder_path + '/' + file_name + '.xacro'
-                urdf_file_name = foulder_path + '/' + file_name + '.urdf'
-                os.system("rosrun xacro xacro " + xacro_file_name + " robot_name:='" + robot_name + "' > " + urdf_file_name)
+                os.system("rosrun xacro xacro " + xacro_path + " robot_name:='" + robot_name + "' > " + urdf_path)
 
-            file_name += '.urdf'
-            robot_id[robot_name] = p.loadURDF(file_name, start_pos, start_orientation, 0, fixed, flags=p.URDF_USE_INERTIA_FROM_FILE)
+            robot_id[robot_name] = p.loadURDF(urdf_path, start_pos, start_orientation, 0, fixed, flags=p.URDF_USE_INERTIA_FROM_FILE)
             green_p('  robot_id: ' + str(robot_id[robot_name]))
 
             link_name_to_index[robot_name] = {p.getBodyInfo(robot_id[robot_name])[0].decode('UTF-8'): -1, }
@@ -1053,18 +1098,26 @@ def main():
                                            sensor_offset,
                                            sensor_offset_lock))
 
+    tf_pub_thread = Thread(target=tf_publisher, args=(model_id, model_mesh, model_mesh_offset, use_rviz))
+
     rospy.Service('pybullet_spawn_model',
                   SpawnModel,
                   lambda msg:
                       spawn_model(msg,
-                                  model_id))
+                                  model_id,
+                                  model_mesh,
+                                  model_mesh_offset,
+                                  tf_pub_thread,
+                                  use_rviz))
     rospy.Service('pybullet_delete_model',
                   DeleteModel,
                   lambda msg:
                       delete_model(msg,
-                                   model_id))
+                                   model_id,
+                                   model_mesh,
+                                   model_mesh_offset,
+                                   use_rviz))
     time_pub = rospy.Publisher('/clock', Clock, queue_size=10)
-
 
     p.setTimeStep(simulation_step_time)
     p.stepSimulation()
@@ -1090,8 +1143,7 @@ def main():
 
     sw_pub_thread.start()
 
-    tf_pub_thread = Thread(target=tf_publisher, args=(model_id, ))
-    tf_pub_thread.start()
+#    tf_pub_thread.start()
 
     time.sleep(0.1)
 

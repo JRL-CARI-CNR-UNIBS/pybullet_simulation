@@ -1,5 +1,0 @@
-<?xml version="1.0"?>
-
-<launch>
-  <rosparam command="load" file="$(find pybullet_utils)/config/object_model_param.yaml"/>
-</launch>

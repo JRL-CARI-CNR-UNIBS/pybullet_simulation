@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <launch>
-  <include file="$(find pybullet_utils)/launch/load_object_model_params.launch" />
   <param name="use_sim_time" type="bool" value="true"/>
-  <node name="pybullet_simulation" pkg="pybullet_utils" type="pybullet_simulation.py" output="screen"/>
+  <arg name="use_rviz" default="false" />
+  <node name="pybullet_simulation" pkg="pybullet_utils" type="pybullet_simulation.py" output="screen" args="$(arg use_rviz)"/>
 </launch>
