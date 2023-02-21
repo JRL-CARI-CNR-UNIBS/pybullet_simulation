@@ -124,10 +124,10 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
     return 'true'
 
 
-def spawn_model(srv, objects, tf_pub_thread, scenes, use_rviz):
-    rospy.set_param('tf_pub_thread_enable', True)
-#    if not tf_pub_thread.is_alive():
-#        tf_pub_thread.start()
+def spawn_model(srv, objects, tf_pub_thread, scenes, use_rviz, objects_lock, scenes_lock):
+    objects_lock.acquire()
+    if not tf_pub_thread.is_alive():
+        tf_pub_thread.start()
     if not srv.model_name:
         red_p('Name list is empty')
         return 'false'
@@ -206,7 +206,7 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_rviz):
         start_orientation = [pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]
         objects[object_name] = {}
         objects[object_name]['spawned'] = False
-        objects[object_name]['object_id']= p.loadURDF(urdf_path, start_pos, start_orientation, 0, 0, flags=p.URDF_USE_INERTIA_FROM_FILE)
+        objects[object_name]['object_id'] = p.loadURDF(urdf_path, start_pos, start_orientation, 0, 0, flags = p.URDF_USE_INERTIA_FROM_FILE)
         if (use_rviz == 'true'):
             red_p('Spawn in use_rviz')
             mesh_file = pyassimp.load(mesh_path)
@@ -266,23 +266,27 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_rviz):
             get_scene_clnt = rospy.ServiceProxy('get_planning_scene', GetPlanningScene)
             req = PlanningSceneComponents()
             req.components = sum([
-            PlanningSceneComponents.WORLD_OBJECT_NAMES,
-            PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
-            PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
+                                    PlanningSceneComponents.WORLD_OBJECT_NAMES,
+                                    PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
+                                    PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
+            scenes_lock.acquire()
             scenes[0] = get_scene_clnt(req).scene
             scenes[0].is_diff = True
             scenes[0].robot_state.is_diff = True
             scenes[0].world.collision_objects.append(c_obj)
             apply_scene_clnt.call(scenes[0])
+            scenes_lock.release()
             objects[object_name]['spawned'] = True
             objects[object_name]['attached'] = False
             red_p('Scene applied')
 
     green_p('Model spawned')
+    objects_lock.release()
     return 'true'
 
 
-def delete_model(srv, objects, scenes, use_rviz):
+def delete_model(srv, objects, scenes, use_rviz, objects_lock, scenes_lock):
+    objects_lock.acquire()
     for object_name in srv.object_name:
         if object_name not in objects:
             yellow_p(object_name + ' is not in the scene')
@@ -290,6 +294,7 @@ def delete_model(srv, objects, scenes, use_rviz):
         id = objects[object_name]['object_id']
         if (use_rviz == 'true'):
             apply_scene_clnt = rospy.ServiceProxy('apply_planning_scene', ApplyPlanningScene)
+            scenes_lock.acquire()
             if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
                 scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
                 objects[object_name]['object'].object.operation = objects[object_name]['object'].object.REMOVE
@@ -300,9 +305,10 @@ def delete_model(srv, objects, scenes, use_rviz):
             if objects[object_name]['object'].object in scenes[0].world.collision_objects:
                 scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
             apply_scene_clnt.call(scenes[0])
-
+            scenes_lock.release()
         del objects[object_name]
         p.removeBody(id)
+    objects_lock.release()
     return 'true'
 
 
@@ -390,33 +396,21 @@ def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offse
     return 'true'
 
 
-def tf_publisher(objects, scenes, use_rviz, scenes_lock):
-    rate = rospy.Rate(tf_publish_rate)
-    while not (rospy.get_param('tf_pub_thread_enable')):
-        rate.sleep()
+def tf_publisher(objects, scenes, use_rviz, objects_lock, scenes_lock):
     if rospy.has_param('object_tf_publish_rate'):
         tf_publish_rate = rospy.get_param('object_tf_publish_rate')
         green_p('object_tf_publish_rate: ' + str(tf_publish_rate))
     else:
         tf_publish_rate = 250
         yellow_p('object_tf_publish_rate not set, default value: ' + str(tf_publish_rate))
+    rate = rospy.Rate(tf_publish_rate)
     if (use_rviz == 'true'):
         apply_scene_clnt = rospy.ServiceProxy('apply_planning_scene', ApplyPlanningScene)
-#        get_scene_clnt = rospy.ServiceProxy('get_planning_scene', GetPlanningScene)
-#        req = PlanningSceneComponents()
-#        req.components = sum([
-#        PlanningSceneComponents.WORLD_OBJECT_NAMES,
-#        PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
-#        PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
-#        scene = get_scene_clnt(req).scene
-#        scene.is_diff = True
-#        scene.robot_state.is_diff = True
     br = tf.TransformBroadcaster()
     current_time = rospy.Time.now().to_sec()
     while not rospy.is_shutdown():
         if (current_time != rospy.Time.now().to_sec()):
-#            if (use_rviz == 'true'):
-#                scene = get_scene_clnt(req).scene
+            objects_lock.acquire()
             for object_name in objects:
                 if 'object_id' in objects[object_name]:
                     pose = p.getBasePositionAndOrientation(objects[object_name]['object_id'])
@@ -439,7 +433,6 @@ def tf_publisher(objects, scenes, use_rviz, scenes_lock):
                                             scenes[0].robot_state.attached_collision_objects.append(objects[object_name]['object'])
                                             scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
                                             red_p('Added attached obj')
-    #                                        apply_scene_clnt.call(scenes[0])
                                             objects[object_name]['attached'] = True
                                     else:
                                         if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
@@ -451,10 +444,10 @@ def tf_publisher(objects, scenes, use_rviz, scenes_lock):
                                             objects[object_name]['object'].object.operation = objects[object_name]['object'].object.ADD
                                             scenes[0].world.collision_objects.append(objects[object_name]['object'].object)
                                             red_p('Removed attached obj')
-    #                                        apply_scene_clnt.call(scenes[0])
                                             objects[object_name]['attached'] = False
                         scenes_lock.release()
                         apply_scene_clnt.call(scenes[0])
+            objects_lock.release()
             current_time = rospy.Time.now().to_sec()
         rate.sleep()
 
@@ -497,6 +490,7 @@ def main():
     control_mode_lock = Lock()
     sensor_offset_lock = Lock()
     scenes_lock = Lock()
+    objects_lock = Lock()
 
     use_rviz = sys.argv[1]
 
@@ -504,9 +498,6 @@ def main():
     gear_constraint_to_joint = {}
     robot_id = {}
     objects = {}
-    model_id = {}
-    model_mesh = {}
-    model_mesh_offset = {}
     link_name_to_index = {}
     joint_name_to_index = {}
     joint_state_publish_rate = None
@@ -1217,9 +1208,7 @@ def main():
     scene = PlanningScene()
     scenes.append(scene)
 
-    rospy.set_param('tf_pub_thread_enable', False)
-    tf_pub_thread = Thread(target=tf_publisher, args=(objects, scenes, use_rviz, scenes_lock))
-    tf_pub_thread.start()
+    tf_pub_thread = Thread(target=tf_publisher, args=(objects, scenes, use_rviz, objects_lock, scenes_lock))
 
     rospy.Service('pybullet_spawn_model',
                   SpawnModel,
@@ -1228,14 +1217,18 @@ def main():
                                   objects,
                                   tf_pub_thread,
                                   scenes,
-                                  use_rviz))
+                                  use_rviz,
+                                  objects_lock,
+                                  scenes_lock))
     rospy.Service('pybullet_delete_model',
                   DeleteModel,
                   lambda msg:
                       delete_model(msg,
                                    objects,
                                    scenes,
-                                   use_rviz))
+                                   use_rviz,
+                                   objects_lock,
+                                   scenes_lock))
     time_pub = rospy.Publisher('/clock', Clock, queue_size=10)
 
     p.setTimeStep(simulation_step_time)
@@ -1253,6 +1246,7 @@ def main():
                                                                joint_name_to_index,
                                                                gear_constraint_to_joint,
                                                                scenes,
+                                                               objects_lock,
                                                                scenes_lock))
     js_pub_thread.start()
 
