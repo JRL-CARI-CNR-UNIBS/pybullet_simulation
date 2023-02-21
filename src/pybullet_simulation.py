@@ -1253,8 +1253,7 @@ def main():
                                                                joint_state_publish_rate,
                                                                joint_name_to_index,
                                                                gear_constraint_to_joint,
-                                                               scenes,
-                                                               objects_lock,
+                                                               scenes,                                                               
                                                                scenes_lock))
     js_pub_thread.start()
 
