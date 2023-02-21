@@ -290,9 +290,17 @@ def delete_model(srv, objects, scenes, use_rviz):
         id = objects[object_name]['object_id']
         if (use_rviz == 'true'):
             apply_scene_clnt = rospy.ServiceProxy('apply_planning_scene', ApplyPlanningScene)
+            if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
+                scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
+                objects[object_name]['object'].object.operation = objects[object_name]['object'].object.REMOVE
+                scenes[0].robot_state.attached_collision_objects.append(objects[object_name]['object'])
+                apply_scene_clnt.call(scenes[0])
+                scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
+
             if objects[object_name]['object'].object in scenes[0].world.collision_objects:
                 scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
             apply_scene_clnt.call(scenes[0])
+
         del objects[object_name]
         p.removeBody(id)
     return 'true'
