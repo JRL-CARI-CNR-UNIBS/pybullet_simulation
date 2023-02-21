@@ -126,7 +126,7 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
 
 
 def spawn_model(srv, objects, tf_pub_thread, scenes, use_rviz):
-    if tf_pub_thread.is_alive() is False:
+    if not tf_pub_thread.is_alive():
         tf_pub_thread.start()
     if not srv.model_name:
         red_p('Name list is empty')
@@ -419,20 +419,32 @@ def tf_publisher(objects, scenes, use_rviz, scenes_lock):
                         scenes_lock.acquire()
                         if (rospy.has_param('/' + object_name + '/attached')):
                             if (rospy.has_param('/' + object_name + '/attached_link')):
-                                if(rospy.get_param('/' + object_name + '/attached')):
-                                    red_p('In attached')
-                                    attached_link = rospy.get_param('/' + object_name + '/attached_link')
-                                    objects[object_name]['object'].link_name = attached_link
-                                    if not objects[object_name]['attached']:
-                                        scenes[0].robot_state.attached_collision_objects.append(objects[object_name]['object'])
-                                        apply_scene_clnt.call(scenes[0])
-                                        objects[object_name]['attached'] = True
-                                else:
-                                    if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
-                                        scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
-                                        apply_scene_clnt.call(scenes[0])
-                                        objects[object_name]['attached'] = False
+                                if (rospy.has_param('/' + object_name + '/touch_links')):
+                                    if(rospy.get_param('/' + object_name + '/attached')):
+                                        attached_link = rospy.get_param('/' + object_name + '/attached_link')
+                                        touch_links = rospy.get_param('/' + object_name + '/touch_links')
+                                        objects[object_name]['object'].link_name = attached_link
+                                        objects[object_name]['object'].touch_links = touch_links
+                                        if not objects[object_name]['attached']:
+                                            scenes[0].robot_state.attached_collision_objects.append(objects[object_name]['object'])
+                                            scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
+                                            red_p('Added attached obj')
+    #                                        apply_scene_clnt.call(scenes[0])
+                                            objects[object_name]['attached'] = True
+                                    else:
+                                        if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
+                                            scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
+                                            objects[object_name]['object'].object.operation = objects[object_name]['object'].object.REMOVE
+                                            scenes[0].robot_state.attached_collision_objects.append(objects[object_name]['object'])
+                                            apply_scene_clnt.call(scenes[0])
+                                            scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
+                                            objects[object_name]['object'].object.operation = objects[object_name]['object'].object.ADD
+                                            scenes[0].world.collision_objects.append(objects[object_name]['object'].object)
+                                            red_p('Removed attached obj')
+    #                                        apply_scene_clnt.call(scenes[0])
+                                            objects[object_name]['attached'] = False
                         scenes_lock.release()
+                        apply_scene_clnt.call(scenes[0])
             current_time = rospy.Time.now().to_sec()
         rate.sleep()
 
