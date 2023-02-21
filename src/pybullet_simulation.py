@@ -269,6 +269,7 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_rviz, objects_lock, sce
                                     PlanningSceneComponents.WORLD_OBJECT_NAMES,
                                     PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
                                     PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
+            cyan_p('spw_m_in')
             scenes_lock.acquire()
             scenes[0] = get_scene_clnt(req).scene
             scenes[0].is_diff = True
@@ -276,6 +277,7 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_rviz, objects_lock, sce
             scenes[0].world.collision_objects.append(c_obj)
             apply_scene_clnt.call(scenes[0])
             scenes_lock.release()
+            cyan_p('spw_m_out')
             objects[object_name]['spawned'] = True
             objects[object_name]['attached'] = False
             red_p('Scene applied')
@@ -294,6 +296,7 @@ def delete_model(srv, objects, scenes, use_rviz, objects_lock, scenes_lock):
         id = objects[object_name]['object_id']
         if (use_rviz == 'true'):
             apply_scene_clnt = rospy.ServiceProxy('apply_planning_scene', ApplyPlanningScene)
+            yellow_p('del_model_in')
             scenes_lock.acquire()
             if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
                 scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
@@ -306,6 +309,7 @@ def delete_model(srv, objects, scenes, use_rviz, objects_lock, scenes_lock):
                 scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
             apply_scene_clnt.call(scenes[0])
             scenes_lock.release()
+            yellow_p('del_model_out')
         del objects[object_name]
         p.removeBody(id)
     objects_lock.release()
@@ -344,9 +348,11 @@ def joint_state_publisher(robot_id, js_publishers, joint_states, controlled_join
             js_msg.velocity = velocity
             js_msg.effort = effort
             js_publishers[robot_name].publish(js_msg)
+            red_p('jsp_in')
             scenes_lock.acquire()
             scenes[0].robot_state.joint_state = js_msg
             scenes_lock.release()
+            red_p('jsp_out')
         rate.sleep()
 
 
@@ -420,6 +426,7 @@ def tf_publisher(objects, scenes, use_rviz, objects_lock, scenes_lock):
                                      object_name,
                                      "world")
                     if ((use_rviz == 'true') and objects[object_name]['spawned']):
+                        green_p('tf_pub_in')
                         scenes_lock.acquire()
                         if (rospy.has_param('/' + object_name + '/attached')):
                             if (rospy.has_param('/' + object_name + '/attached_link')):
@@ -446,6 +453,7 @@ def tf_publisher(objects, scenes, use_rviz, objects_lock, scenes_lock):
                                             red_p('Removed attached obj')
                                             objects[object_name]['attached'] = False
                         scenes_lock.release()
+                        green_p('tf_pub_out')
                         apply_scene_clnt.call(scenes[0])
             objects_lock.release()
             current_time = rospy.Time.now().to_sec()
