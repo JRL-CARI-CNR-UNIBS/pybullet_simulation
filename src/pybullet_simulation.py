@@ -8,11 +8,10 @@ import rospy
 import rospkg
 import tf
 import time
-import copy
 import pyassimp
 from moveit_msgs.srv import ApplyPlanningScene, GetPlanningScene
 from moveit_msgs.msg import CollisionObject, PlanningScene, PlanningSceneComponents, AttachedCollisionObject
-from geometry_msgs.msg import WrenchStamped, PoseStamped, Pose, Point
+from geometry_msgs.msg import WrenchStamped, Pose, Point
 from shape_msgs.msg import MeshTriangle, Mesh
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
@@ -126,8 +125,9 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
 
 
 def spawn_model(srv, objects, tf_pub_thread, scenes, use_rviz):
-    if not tf_pub_thread.is_alive():
-        tf_pub_thread.start()
+    rospy.set_param('tf_pub_thread_enable', True)
+#    if not tf_pub_thread.is_alive():
+#        tf_pub_thread.start()
     if not srv.model_name:
         red_p('Name list is empty')
         return 'false'
@@ -391,6 +391,9 @@ def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offse
 
 
 def tf_publisher(objects, scenes, use_rviz, scenes_lock):
+    rate = rospy.Rate(tf_publish_rate)
+    while not (rospy.get_param('tf_pub_thread_enable')):
+        rate.sleep()
     if rospy.has_param('object_tf_publish_rate'):
         tf_publish_rate = rospy.get_param('object_tf_publish_rate')
         green_p('object_tf_publish_rate: ' + str(tf_publish_rate))
@@ -408,7 +411,6 @@ def tf_publisher(objects, scenes, use_rviz, scenes_lock):
 #        scene = get_scene_clnt(req).scene
 #        scene.is_diff = True
 #        scene.robot_state.is_diff = True
-    rate = rospy.Rate(tf_publish_rate)
     br = tf.TransformBroadcaster()
     current_time = rospy.Time.now().to_sec()
     while not rospy.is_shutdown():
@@ -1215,7 +1217,9 @@ def main():
     scene = PlanningScene()
     scenes.append(scene)
 
+    rospy.set_param('tf_pub_thread_enable', False)
     tf_pub_thread = Thread(target=tf_publisher, args=(objects, scenes, use_rviz, scenes_lock))
+    tf_pub_thread.start()
 
     rospy.Service('pybullet_spawn_model',
                   SpawnModel,
