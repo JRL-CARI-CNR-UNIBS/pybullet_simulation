@@ -2,6 +2,6 @@
 
 <launch>
   <param name="use_sim_time" type="bool" value="true"/>
-  <arg name="use_rviz" default="false" />
-  <node name="pybullet_simulation" pkg="pybullet_utils" type="pybullet_simulation.py" output="screen" args="$(arg use_rviz)"/>
+  <arg name="use_moveit" default="false" />
+  <node name="pybullet_simulation" pkg="pybullet_utils" type="pybullet_simulation.py" output="screen" args="$(arg use_moveit)"/>
 </launch>
