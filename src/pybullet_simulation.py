@@ -9,6 +9,7 @@ import rospkg
 import tf
 import time
 import pyassimp
+import numpy
 from moveit_msgs.srv import ApplyPlanningScene, GetPlanningScene
 from moveit_msgs.msg import CollisionObject, PlanningScene, PlanningSceneComponents, AttachedCollisionObject
 from geometry_msgs.msg import WrenchStamped, Pose, Point
@@ -48,14 +49,24 @@ def cyan_p(msg):
 
 
 class JointTargetSubscriber:
-    def __init__(self, robot_id, joint_name_to_index, joint_control_mode, controlled_joint_name, robot_name, jt_topic, control_mode_lock):
+    def __init__(self, robot_id, joint_name_to_index, joint_effort_limits, joint_control_mode, controlled_joint_name, robot_name, jt_topic, control_mode_lock, simulation_step_time, joint_states, joint_state_lock, joint_control_integral_gain):
         self.robot_id              = robot_id
         self.joint_name_to_index   = joint_name_to_index
+        self.joint_effort_limits   = joint_effort_limits
         self.joint_control_mode    = joint_control_mode
         self.controlled_joint_name = controlled_joint_name
         self.robot_name            = robot_name
         self.jt_topic              = jt_topic
-        self.control_mode_lock                  = control_mode_lock
+        self.control_mode_lock     = control_mode_lock
+        self.simulation_step_time  = simulation_step_time
+        self.joint_states          = joint_states
+        self.joint_state_lock      = joint_state_lock
+        self.pos_compensation = {}
+        self.joint_control_integral_gain = joint_control_integral_gain
+
+        for joint_name in self.controlled_joint_name[self.robot_name]:
+            self.pos_compensation[joint_name] = 0.0
+
         rospy.Subscriber(self.jt_topic,
                          JointState,
                          self.jointTargetSubscriber)
@@ -63,22 +74,31 @@ class JointTargetSubscriber:
     def jointTargetSubscriber(self, data):
         self.control_mode_lock.acquire()
         for joint_id in range(len(data.name)):
+#            green_p('A')
             if data.name[joint_id] in self.controlled_joint_name[self.robot_name]:
                 if (self.joint_control_mode[self.robot_name] == 'position'):
-                    p.setJointMotorControl2(self.robot_id[self.robot_name],
-                                            self.joint_name_to_index[self.robot_name][data.name[joint_id]],
-                                            p.POSITION_CONTROL,
-                                            targetPosition=data.position[joint_id])
+                    p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
+                                            jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
+                                            controlMode=p.POSITION_CONTROL,
+                                            targetPosition=data.position[joint_id] + self.pos_compensation[data.name[joint_id]])
+#                    if ( data.name[joint_id] == 'joint1' ):
+#                        green_p('js:   ' + str(data.position[joint_id]))
+#                        up = data.position[joint_id] + self.pos_compensation[data.name[joint_id]]
+#                        green_p('comp: ' + str(up))
                 elif (self.joint_control_mode[self.robot_name] == 'velocity'):
-                    p.setJointMotorControl2(self.robot_id[self.robot_name],
-                                            self.joint_name_to_index[self.robot_name][data.name[joint_id]],
-                                            p.VELOCITY_CONTROL,
+                    p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
+                                            jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
+                                            controlMode=p.VELOCITY_CONTROL,
                                             targetVelocity=data.velocity[joint_id])
                 elif (self.joint_control_mode[self.robot_name] == 'torque'):
                     p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
                                             jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
                                             controlMode=p.TORQUE_CONTROL,
                                             force=data.effort[joint_id])
+                self.joint_state_lock.acquire()
+                self.pos_compensation[data.name[joint_id]] += self.joint_control_integral_gain[self.robot_name][self.controlled_joint_name[self.robot_name].index(data.name[joint_id])] * self.simulation_step_time *(data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
+#                print(self.pos_compensation[data.name[joint_id]])
+                self.joint_state_lock.release()
         self.control_mode_lock.release()
 
 
@@ -320,7 +340,7 @@ def delete_model(srv, objects, scenes, use_moveit, objects_lock, scenes_lock):
     return 'true'
 
 
-def joint_state_publisher(robot_id, js_publishers, joint_states, controlled_joint_name, joint_state_publish_rate, joint_name_to_index, gear_constraint_to_joint, scenes, scenes_lock):
+def joint_state_publisher(robot_id, js_publishers, joint_states, controlled_joint_name, joint_state_publish_rate, joint_name_to_index, gear_constraint_to_joint, scenes, scenes_lock, joint_state_lock):
     name = []
     position = []
     velocity = []
@@ -329,7 +349,10 @@ def joint_state_publisher(robot_id, js_publishers, joint_states, controlled_join
     js_msg = JointState()
     while not rospy.is_shutdown():
         for robot_name in js_publishers.keys():
+#            red_p('A')
+            joint_state_lock.acquire()
             joint_states[robot_name] = p.getJointStates(robot_id[robot_name], range(p.getNumJoints(robot_id[robot_name])))
+            joint_state_lock.release()
             name.clear()
             position.clear()
             velocity.clear()
@@ -499,6 +522,7 @@ def main():
     sensor_offset_lock = Lock()
     scenes_lock = Lock()
     objects_lock = Lock()
+    joint_state_lock = Lock()
 
     use_moveit = sys.argv[1]
 
@@ -507,13 +531,14 @@ def main():
     robot_id = {}
     objects = {}
     link_name_to_index = {}
+    joint_control_integral_gain = {}
     joint_name_to_index = {}
-    joint_state_publish_rate = None
-    simulation_step_time = None
-    desidered_real_step_time = None
     joint_states = {}
     joint_control_mode = {}
     joint_effort_limits = {}
+    joint_state_publish_rate = None
+    simulation_step_time = None
+    desidered_real_step_time = None
     jt_pubishers = {}
     state_id = {}
     sw_publishers = {}
@@ -661,6 +686,16 @@ def main():
             else:
                 red_p('No param /' + robot_name + '/controller_joint_name')
                 raise SystemExit
+            if 'joint_control_integral_gain' in robot_info:
+                joint_control_integral_gain[robot_name] = robot_info['joint_control_integral_gain']
+                array_str = '  joint_control_integral_gain: ['
+                for integral_gain in joint_control_integral_gain[robot_name]:
+                    array_str += str(integral_gain) + ' '
+                array_str += ']'
+                green_p(array_str)
+            else:
+                yellow_p('No param /' + robot_name + '/joint_control_integral_gain, default value 0.0 for every joint')
+                joint_control_integral_gain[robot_name] = numpy.zeros(len(controlled_joint_name[robot_name]))
             if 'start_configuration' in robot_info:
                 if (len(controlled_joint_name[robot_name]) == len(robot_info['start_configuration'])):
                     for index in range(len(controlled_joint_name[robot_name])):
@@ -792,53 +827,28 @@ def main():
                     else:
                         red_p('No param /' + robot_name + '/constraint/child_frame_orientation')
                         raise SystemExit
+
                     if (type == 'prismatic'):
-                        constraint_id = p.createConstraint(robot_id[parent_body],
-                                                           link_name_to_index[parent_body][parent_link],
-                                                           robot_id[child_body],
-                                                           link_name_to_index[child_body][child_link],
-                                                           p.JOINT_PRISMATIC,
-                                                           axis,
-                                                           parent_frame_position,
-                                                           child_frame_position,
-                                                           parent_frame_orientation,
-                                                           child_frame_orientation)
+                        constraint_type = p.JOINT_PRISMATIC
                     elif (type == 'fixed'):
-                        constraint_id = p.createConstraint(robot_id[parent_body],
-                                                           link_name_to_index[parent_body][parent_link],
-                                                           robot_id[child_body],
-                                                           link_name_to_index[child_body][child_link],
-                                                           p.JOINT_FIXED,
-                                                           axis,
-                                                           parent_frame_position,
-                                                           child_frame_position,
-                                                           parent_frame_orientation,
-                                                           child_frame_orientation)
+                        constraint_type = p.JOINT_FIXED
                     elif (type == 'point2point'):
-                        constraint_id = p.createConstraint(robot_id[parent_body],
-                                                           link_name_to_index[parent_body][parent_link],
-                                                           robot_id[child_body],
-                                                           link_name_to_index[child_body][child_link],
-                                                           p.JOINT_POINT2POINT,
-                                                           axis,
-                                                           parent_frame_position,
-                                                           child_frame_position,
-                                                           parent_frame_orientation,
-                                                           child_frame_orientation)
+                        constraint_type = p.JOINT_POINT2POINT
                     elif (type == 'gear'):
-                        constraint_id = p.createConstraint(robot_id[parent_body],
-                                                           link_name_to_index[parent_body][parent_link],
-                                                           robot_id[child_body],
-                                                           link_name_to_index[child_body][child_link],
-                                                           p.JOINT_GEAR,
-                                                           axis,
-                                                           parent_frame_position,
-                                                           child_frame_position,
-                                                           parent_frame_orientation,
-                                                           child_frame_orientation)
+                        constraint_type = p.JOINT_GEAR
                     else:
                         red_p('Constraint type not foud')
                         raise SystemExit
+                    constraint_id = p.createConstraint(robot_id[parent_body],
+                                                       link_name_to_index[parent_body][parent_link],
+                                                       robot_id[child_body],
+                                                       link_name_to_index[child_body][child_link],
+                                                       constraint_type,
+                                                       axis,
+                                                       parent_frame_position,
+                                                       child_frame_position,
+                                                       parent_frame_orientation,
+                                                       child_frame_orientation)
                     if (type == 'gear'):
                         gear_constraint_to_joint[constraint_id] = p.getJointInfo(robot_id[child_body], link_name_to_index[child_body][child_link])[1].decode('UTF-8')
                         print(gear_constraint_to_joint)
@@ -866,10 +876,10 @@ def main():
                     if 'max_force' in constraint:
                         max_force = constraint['max_force']
                         green_p('      max_force: ' + str(max_force))
-                        p.changeConstraint(constraint_id, maxForce=max_force)
                     else:
                         yellow_p('      max_force: not set. Default:100')
-                        p.changeConstraint(constraint_id, maxForce=100)
+                        max_force = 100
+                    p.changeConstraint(constraint_id, maxForce=max_force)
             else:
                 yellow_p('No param /' + robot_name + '/constraints')
 
@@ -968,13 +978,19 @@ def main():
 
             jt_pubishers[robot_name] = JointTargetSubscriber(robot_id,
                                                              joint_name_to_index,
+                                                             joint_effort_limits,
                                                              joint_control_mode,
                                                              controlled_joint_name,
                                                              robot_name,
                                                              jt_topic,
-                                                             control_mode_lock)
-
+                                                             control_mode_lock,
+                                                             simulation_step_time,
+                                                             joint_states,
+                                                             joint_state_lock,
+                                                             joint_control_integral_gain)
+            joint_state_lock.acquire()
             joint_states[robot_name] = p.getJointStates(robot_id[robot_name], range(p.getNumJoints(robot_id[robot_name])))
+            joint_state_lock.release()
             for joint_name in joint_name_to_index[robot_name].keys():
                 if joint_name in controlled_joint_name[robot_name]:
                     if (joint_control_mode[robot_name] == 'position'):
@@ -1099,69 +1115,42 @@ def main():
                     red_p('No param /' + robot_name + '/constraint/child_frame_orientation')
                     raise SystemExit
                 if (type == 'prismatic'):
-                    constraint_id = p.createConstraint(robot_id[parent_body],
-                                                       link_name_to_index[parent_body][parent_link],
-                                                       robot_id[child_body],
-                                                       link_name_to_index[child_body][child_link],
-                                                       p.JOINT_PRISMATIC,
-                                                       axis,
-                                                       parent_frame_position,
-                                                       child_frame_position,
-                                                       parent_frame_orientation,
-                                                       child_frame_orientation)
+                    constraint_type = p.JOINT_PRISMATIC
                 elif (type == 'fixed'):
-                    constraint_id = p.createConstraint(robot_id[parent_body],
-                                                       link_name_to_index[parent_body][parent_link],
-                                                       robot_id[child_body],
-                                                       link_name_to_index[child_body][child_link],
-                                                       p.JOINT_FIXED,
-                                                       axis,
-                                                       parent_frame_position,
-                                                       child_frame_position,
-                                                       parent_frame_orientation,
-                                                       child_frame_orientation)
+                    constraint_type = p.JOINT_FIXED
                 elif (type == 'point2point'):
-                    constraint_id = p.createConstraint(robot_id[parent_body],
-                                                       link_name_to_index[parent_body][parent_link],
-                                                       robot_id[child_body],
-                                                       link_name_to_index[child_body][child_link],
-                                                       p.JOINT_POINT2POINT,
-                                                       axis,
-                                                       parent_frame_position,
-                                                       child_frame_position,
-                                                       parent_frame_orientation,
-                                                       child_frame_orientation)
+                    constraint_type = p.JOINT_POINT2POINT
                 elif (type == 'gear'):
-                    constraint_id = p.createConstraint(robot_id[parent_body],
-                                                       link_name_to_index[parent_body][parent_link],
-                                                       robot_id[child_body],
-                                                       link_name_to_index[child_body][child_link],
-                                                       p.JOINT_GEAR,
-                                                       axis,
-                                                       parent_frame_position,
-                                                       child_frame_position,
-                                                       parent_frame_orientation,
-                                                       child_frame_orientation)
+                    constraint_type = p.JOINT_GEAR
                 else:
                     red_p('Constraint type not foud')
                     raise SystemExit
+                constraint_id = p.createConstraint(robot_id[parent_body],
+                                                   link_name_to_index[parent_body][parent_link],
+                                                   robot_id[child_body],
+                                                   link_name_to_index[child_body][child_link],
+                                                   constraint_type,
+                                                   axis,
+                                                   parent_frame_position,
+                                                   child_frame_position,
+                                                   parent_frame_orientation,
+                                                   child_frame_orientation)
                 if (type == 'gear'):
                     gear_constraint_to_joint[constraint_id] = p.getJointInfo(robot_id[child_body], link_name_to_index[child_body][child_link])[1].decode('UTF-8')
                     print(gear_constraint_to_joint)
                     if 'gear_ratio' in constraint:
                         gear_ratio = constraint['gear_ratio']
                         green_p('      gear_ratio: ' + str(gear_ratio))
-                        p.changeConstraint(constraint_id, gearRatio=gear_ratio)
                     else:
                         yellow_p('      gear_ratio: not set. Default:1')
-                        p.changeConstraint(constraint_id, gearRatio=1)
+                        gear_ration = 1
                     if 'erp' in constraint:
                         erp_var = constraint['erp']
                         green_p('      erp: ' + str(erp_var))
-                        p.changeConstraint(constraint_id, erp=erp_var)
                     else:
                         yellow_p('      erp: not set. Default:1')
-                        p.changeConstraint(constraint_id, erp=1)
+                        erp_var = 1
+                    p.changeConstraint(constraint_id, erp=erp_var, gearRatio=gear_ratio)
                     if (type == 'gear'):
                         if 'gear_aux_link' in constraint:
                             gear_aux_link = constraint['gear_aux_link']
@@ -1254,7 +1243,8 @@ def main():
                                                                joint_name_to_index,
                                                                gear_constraint_to_joint,
                                                                scenes,                                                               
-                                                               scenes_lock))
+                                                               scenes_lock,
+                                                               joint_state_lock))
     js_pub_thread.start()
 
     sw_pub_thread = Thread(target=sensor_wrench_publisher, args=(robot_id,
