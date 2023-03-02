@@ -74,17 +74,12 @@ class JointTargetSubscriber:
     def jointTargetSubscriber(self, data):
         self.control_mode_lock.acquire()
         for joint_id in range(len(data.name)):
-#            green_p('A')
             if data.name[joint_id] in self.controlled_joint_name[self.robot_name]:
                 if (self.joint_control_mode[self.robot_name] == 'position'):
                     p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
                                             jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
                                             controlMode=p.POSITION_CONTROL,
                                             targetPosition=data.position[joint_id] + self.pos_compensation[data.name[joint_id]])
-#                    if ( data.name[joint_id] == 'joint1' ):
-#                        green_p('js:   ' + str(data.position[joint_id]))
-#                        up = data.position[joint_id] + self.pos_compensation[data.name[joint_id]]
-#                        green_p('comp: ' + str(up))
                 elif (self.joint_control_mode[self.robot_name] == 'velocity'):
                     p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
                                             jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
@@ -97,7 +92,6 @@ class JointTargetSubscriber:
                                             force=data.effort[joint_id])
                 self.joint_state_lock.acquire()
                 self.pos_compensation[data.name[joint_id]] += self.joint_control_integral_gain[self.robot_name][self.controlled_joint_name[self.robot_name].index(data.name[joint_id])] * self.simulation_step_time *(data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
-#                print(self.pos_compensation[data.name[joint_id]])
                 self.joint_state_lock.release()
         self.control_mode_lock.release()
 
@@ -349,7 +343,6 @@ def joint_state_publisher(robot_id, js_publishers, joint_states, controlled_join
     js_msg = JointState()
     while not rospy.is_shutdown():
         for robot_name in js_publishers.keys():
-#            red_p('A')
             joint_state_lock.acquire()
             joint_states[robot_name] = p.getJointStates(robot_id[robot_name], range(p.getNumJoints(robot_id[robot_name])))
             joint_state_lock.release()
