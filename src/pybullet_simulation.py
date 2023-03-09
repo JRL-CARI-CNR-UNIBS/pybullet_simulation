@@ -489,6 +489,7 @@ def save_state(srv, state_id, joint_states, state_js, joint_state_lock):
     state_js[srv.state_name] = {}
     state_js[srv.state_name] = copy.copy(joint_states)
     joint_state_lock.release()
+    green_p('state ' + srv.state_name + ' saved')
     return 'true'
 
 
@@ -523,9 +524,10 @@ def restore_state(srv, state_id, state_js, joint_name_to_index, jt_publishers):
         jt_msg.velocity = velocity
         jt_msg.effort = effort
         jt_publishers[robot_name].publish(jt_msg)
-        rospy.sleep(0.05)
+#        rospy.sleep(0.05)
 
     p.restoreState(state_id[srv.state_name])
+    green_p('state ' + srv.state_name + ' restored')
 
     return 'true'
 
