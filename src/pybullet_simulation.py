@@ -10,6 +10,7 @@ import tf
 import time
 import pyassimp
 import numpy
+import copy
 from moveit_msgs.srv import ApplyPlanningScene, GetPlanningScene
 from moveit_msgs.msg import CollisionObject, PlanningScene, PlanningSceneComponents, AttachedCollisionObject
 from geometry_msgs.msg import WrenchStamped, Pose, Point
@@ -476,7 +477,8 @@ def tf_publisher(objects, scenes, use_moveit, objects_lock, scenes_lock):
         rate.sleep()
 
 
-def save_state(srv, state_id):
+def save_state(srv, state_id, joint_states, state_js, joint_state_lock):
+    joint_state_lock.acquire()
     if not srv.state_name:
         red_p('Name is empty')
         return 'false'
@@ -484,21 +486,51 @@ def save_state(srv, state_id):
         red_p(srv.state_name + ', a state whit this name already exists')
         return 'false'
     state_id[srv.state_name] = p.saveState()
+    state_js[srv.state_name] = {}
+    state_js[srv.state_name] = copy.copy(joint_states)
+    joint_state_lock.release()
     return 'true'
 
 
-def restore_state(srv, state_id):
+def restore_state(srv, state_id, state_js, joint_name_to_index, jt_publishers):
     if not srv.state_name:
         red_p('Name is empty')
         return 'false'
     if srv.state_name not in state_id.keys():
         red_p(srv.state_name + ', no state with this name')
         return 'false'
+
+    jt_msg = JointState()
+    name = []
+    position = []
+    velocity = []
+    effort = []
+
+    for robot_name in state_js[srv.state_name]:
+        name.clear()
+        position.clear()
+        velocity.clear()
+        effort.clear()
+        for joint_name in joint_name_to_index[robot_name]:
+            name.append(joint_name)
+            position.append(state_js[srv.state_name][robot_name][joint_name_to_index[robot_name][joint_name]][0])
+            velocity.append(state_js[srv.state_name][robot_name][joint_name_to_index[robot_name][joint_name]][1])
+            effort.append(state_js[srv.state_name][robot_name][joint_name_to_index[robot_name][joint_name]][3])
+        jt_msg.header = Header()
+        jt_msg.header.stamp = rospy.Time.now()
+        jt_msg.name = name
+        jt_msg.position = position
+        jt_msg.velocity = velocity
+        jt_msg.effort = effort
+        jt_publishers[robot_name].publish(jt_msg)
+        rospy.sleep(0.05)
+
     p.restoreState(state_id[srv.state_name])
+
     return 'true'
 
 
-def delete_state(srv, state_id):
+def delete_state(srv, state_id, state_js):
     if not srv.state_name:
         red_p('Name list is empty')
         return 'false'
@@ -527,12 +559,12 @@ def main():
     joint_control_integral_gain = {}
     joint_name_to_index = {}
     joint_states = {}
+    state_js = {}
     joint_control_mode = {}
     joint_effort_limits = {}
     joint_state_publish_rate = None
     simulation_step_time = None
     desidered_real_step_time = None
-    jt_pubishers = {}
     state_id = {}
     sw_publishers = {}
     sensor_offset = {}
@@ -551,11 +583,14 @@ def main():
             ready = True
 
     js_publishers = {}
+    jt_publishers = {}
+    jt_subscriber = {}
 
     green_p('Topic generated:')
     for robot_name in robot_names:
         js_topic = '/' + robot_name + '/joint_states'
         js_publishers[robot_name] = rospy.Publisher('/' + robot_name + '/joint_states', JointState, queue_size=1)
+        jt_publishers[robot_name] = rospy.Publisher('/' + robot_name + '/joint_target', JointState, queue_size=1)
         green_p(' - ' + js_topic)
 
     physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
@@ -628,7 +663,7 @@ def main():
                 urdf_file_path = robot_info['urdf_file_path']
                 green_p('  urdf_file_path: ' + urdf_file_path)
                 urdf_path = folder_path + '/' + urdf_file_path
-                if (urdf_path.find('.xacro') == -1):
+                if (urdf_path.find('.urdf') == -1):
                     red_p('  urdf_file_path do not has extension .urdf')
                     raise SystemExit
             elif 'xacro_file_path' in robot_info:
@@ -677,8 +712,8 @@ def main():
                 array_str += ']'
                 green_p(array_str)
             else:
-                red_p('No param /' + robot_name + '/controller_joint_name')
-                raise SystemExit
+                yellow_p('No param /' + robot_name + '/controller_joint_name')
+                controlled_joint_name[robot_name] = []
             if 'joint_control_integral_gain' in robot_info:
                 joint_control_integral_gain[robot_name] = robot_info['joint_control_integral_gain']
                 array_str = '  joint_control_integral_gain: ['
@@ -959,28 +994,32 @@ def main():
                                      linearDamping=linear_damping,
                                      angularDamping=angular_damping,
                                      frictionAnchor=friction_anchor)
-
+            else:
+                yellow_p('No param /' + robot_name + '/link_dynamics')
             if 'joint_control_mode' in robot_info:
                 joint_control_mode[robot_name] = robot_info['joint_control_mode']
                 green_p('  joint_control_mode: ' + joint_control_mode[robot_name])
             else:
-                red_p('No param /' + robot_name + '/joint_control_mode')
-                raise SystemExit
+                if ( len(controlled_joint_name[robot_name]) != 0 ):
+                    red_p('No param /' + robot_name + '/joint_control_mode')
+                else:
+                    yellow_p('No param /' + robot_name + '/joint_control_mode')
+                    joint_control_mode[robot_name] = 'Nothing'
 
             jt_topic = '/' + robot_name + '/joint_target'
 
-            jt_pubishers[robot_name] = JointTargetSubscriber(robot_id,
-                                                             joint_name_to_index,
-                                                             joint_effort_limits,
-                                                             joint_control_mode,
-                                                             controlled_joint_name,
-                                                             robot_name,
-                                                             jt_topic,
-                                                             control_mode_lock,
-                                                             simulation_step_time,
-                                                             joint_states,
-                                                             joint_state_lock,
-                                                             joint_control_integral_gain)
+            jt_subscriber[robot_name] = JointTargetSubscriber(robot_id,
+                                                              joint_name_to_index,
+                                                              joint_effort_limits,
+                                                              joint_control_mode,
+                                                              controlled_joint_name,
+                                                              robot_name,
+                                                              jt_topic,
+                                                              control_mode_lock,
+                                                              simulation_step_time,
+                                                              joint_states,
+                                                              joint_state_lock,
+                                                              joint_control_integral_gain)
             joint_state_lock.acquire()
             joint_states[robot_name] = p.getJointStates(robot_id[robot_name], range(p.getNumJoints(robot_id[robot_name])))
             joint_state_lock.release()
@@ -1176,15 +1215,15 @@ def main():
 
     rospy.Service('pybullet_save_state',
                   SaveState,
-                  lambda msg: save_state(msg, state_id))
+                  lambda msg: save_state(msg, state_id, joint_states, state_js, joint_state_lock))
 
     rospy.Service('pybullet_restore_state',
                   RestoreState,
-                  lambda msg: restore_state(msg, state_id))
+                  lambda msg: restore_state(msg, state_id, state_js, joint_name_to_index, jt_publishers))
 
     rospy.Service('pybullet_delete_state',
                   DeleteState,
-                  lambda msg: delete_state(msg, state_id))
+                  lambda msg: delete_state(msg, state_id, state_js))
     rospy.Service('pybullet_sensor_reset',
                   SensorReset,
                   lambda msg: sensor_reset(msg,
@@ -1235,7 +1274,7 @@ def main():
                                                                joint_state_publish_rate,
                                                                joint_name_to_index,
                                                                gear_constraint_to_joint,
-                                                               scenes,                                                               
+                                                               scenes,
                                                                scenes_lock,
                                                                joint_state_lock))
     js_pub_thread.start()
