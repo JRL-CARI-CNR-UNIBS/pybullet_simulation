@@ -280,13 +280,11 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_moveit, objects_lock, s
 
             objects[object_name]['object'] = a_obj
 
-            apply_scene_clnt = rospy.ServiceProxy('apply_planning_scene', ApplyPlanningScene)
             get_scene_clnt = rospy.ServiceProxy('get_planning_scene', GetPlanningScene)
             req = PlanningSceneComponents()
-            req.components = sum([
-                                    PlanningSceneComponents.WORLD_OBJECT_NAMES,
-                                    PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
-                                    PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
+            req.components = sum([PlanningSceneComponents.WORLD_OBJECT_NAMES,
+                                  PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
+                                  PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
             scenes_lock.acquire()
             scenes[0] = get_scene_clnt(req).scene
             scenes[0].is_diff = True
@@ -1010,7 +1008,7 @@ def main():
                 joint_control_mode[robot_name] = robot_info['joint_control_mode']
                 green_p('  joint_control_mode: ' + joint_control_mode[robot_name])
             else:
-                if ( len(controlled_joint_name[robot_name]) != 0 ):
+                if (len(controlled_joint_name[robot_name]) != 0):
                     red_p('No param /' + robot_name + '/joint_control_mode')
                 else:
                     yellow_p('No param /' + robot_name + '/joint_control_mode')
@@ -1185,7 +1183,7 @@ def main():
                         green_p('      gear_ratio: ' + str(gear_ratio))
                     else:
                         yellow_p('      gear_ratio: not set. Default:1')
-                        gear_ration = 1
+                        gear_ratio = 1
                     if 'erp' in constraint:
                         erp_var = constraint['erp']
                         green_p('      erp: ' + str(erp_var))
