@@ -300,7 +300,11 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_moveit, objects_lock, s
         if (use_moveit == 'true'):
             while not (tfl.frameExists(object_name,)):
                 rospy.sleep(0.00001)
-
+#        scenes_lock.acquire()
+#        scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
+#        objects[object_name]['object'].object.operation = objects[object_name]['object'].object.MOVE
+#        scenes[0].world.collision_objects.append(objects[object_name]['object'].object)
+#        scenes_lock.release()
     green_p('Model spawned')
     return 'true'
 
@@ -470,8 +474,12 @@ def tf_publisher(objects, scenes, use_moveit, objects_lock, scenes_lock):
                                             scenes[0].world.collision_objects.append(objects[object_name]['object'].object)
                                             red_p('Removed attached obj')
                                             objects[object_name]['attached'] = False
-                        scenes_lock.release()
+#                                            apply_scene_clnt.call(scenes[0])
+#                                            scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
+#                                            objects[object_name]['object'].object.operation = objects[object_name]['object'].object.MOVE
+#                                            scenes[0].world.collision_objects.append(objects[object_name]['object'].object)
                         apply_scene_clnt.call(scenes[0])
+                        scenes_lock.release()
             objects_lock.release()
             current_time = rospy.Time.now().to_sec()
         rate.sleep()
