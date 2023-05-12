@@ -131,9 +131,11 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
                     green_p('Robot: ' + robot_name + ', Joint: ' + joint_name + ', ' + 'torque' + ', force: 0')
                 else:
                     red_p(srv.control_mode + ' control mode not exists')
+                    control_mode_lock.release()
                     return 'false'
         else:
             red_p(robot_name + ' robot not exists')
+            control_mode_lock.release()
             return 'false'
     control_mode_lock.release()
     return 'true'
@@ -157,6 +159,7 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_moveit, objects_lock, s
         objects_lock.acquire()
         if object_name in objects.keys():
             red_p('Already exists an object with this name')
+            objects_lock.release()
             return 'false'
         objects_lock.release()
         green_p('You want to spawn a ' + model_name + ' with the name ' + object_name)
@@ -403,7 +406,6 @@ def sensor_wrench_publisher(robot_id, sw_publishers, joint_name_to_index, joint_
 
 
 def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offset, sensor_offset_lock):
-    sensor_offset_lock.acquire()
     robot_name = srv.robot_name
     joint_name = srv.joint_name
     if robot_name not in sw_publishers:
@@ -412,6 +414,7 @@ def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offse
     if joint_name not in sw_publishers[robot_name]:
         red_p('The joint ' + joint_name + ' do not has a sensor')
         return 'false'
+    sensor_offset_lock.acquire()
     sensor_wrench = p.getJointStates(robot_id[robot_name], [joint_name_to_index[robot_name][joint_name]])
     sensor_offset[robot_name][joint_name] = [sensor_wrench[0][2][0],
                                              sensor_wrench[0][2][1],
@@ -484,13 +487,13 @@ def tf_publisher(objects, scenes, use_moveit, objects_lock, scenes_lock):
 
 
 def save_state(srv, state_id, joint_states, state_js, joint_state_lock):
-    joint_state_lock.acquire()
     if not srv.state_name:
         red_p('Name is empty')
         return 'false'
     if srv.state_name in state_id.keys():
         red_p(srv.state_name + ', a state whit this name already exists')
         return 'false'
+    joint_state_lock.acquire()
     state_id[srv.state_name] = p.saveState()
     state_js[srv.state_name] = {}
     state_js[srv.state_name] = copy.copy(joint_states)
