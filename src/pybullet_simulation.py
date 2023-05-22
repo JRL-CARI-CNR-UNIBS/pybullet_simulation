@@ -594,7 +594,8 @@ def main():
         jt_publishers[robot_name] = rospy.Publisher('/' + robot_name + '/joint_target', JointState, queue_size=1)
         green_p(' - ' + js_topic)
 
-    physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
+    # physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
+    physicsClient = p.connect(p.DIRECT)  # or p.DIRECT for non-graphical version
 
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     planeId = p.loadURDF("plane.urdf")
