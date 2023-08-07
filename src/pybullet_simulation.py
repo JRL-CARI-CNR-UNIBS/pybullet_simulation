@@ -163,6 +163,8 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_moveit, objects_lock, s
             return 'false'
         objects_lock.release()
         green_p('You want to spawn a ' + model_name + ' with the name ' + object_name)
+
+        fixed = 0
         if rospy.has_param(model_name):
             model_info = rospy.get_param(model_name)
 
@@ -221,16 +223,23 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_moveit, objects_lock, s
         if (file_type == 'xacro'):
             os.system('rosrun xacro xacro ' + xacro_path + ' > ' + urdf_path)
 
+        if (srv.fixed):
+            fixed = 1
+        else:
+            fixed = 0
+
         start_pos = [pose.position.x, pose.position.y, pose.position.z]
         start_orientation = [pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]
         objects_lock.acquire()
         objects[object_name] = {}
         objects[object_name]['spawned'] = False
-        objects[object_name]['object_id'] = p.loadURDF(urdf_path, start_pos, start_orientation, 0, 0, flags = p.URDF_USE_INERTIA_FROM_FILE)
+        objects[object_name]['object_id'] = p.loadURDF(urdf_path, start_pos, start_orientation, 0, fixed, flags = p.URDF_USE_INERTIA_FROM_FILE)
         objects[object_name]['spawned'] = True
         if (use_moveit == 'true'):
-            red_p('Spawn in use_moveit')
+            red_p('Spawn in rviz')
+            red_p(mesh_path)
             mesh_file = pyassimp.load(mesh_path)
+            red_p('Mesh loaded')
             mesh = Mesh()
             for face in mesh_file.meshes[0].faces:
                 triangle = MeshTriangle()
@@ -245,6 +254,7 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_moveit, objects_lock, s
                 point.y = vertex[1]
                 point.z = vertex[2]
                 mesh.vertices.append(point)
+            red_p('Mesh filled')
             pyassimp.release(mesh_file)
             red_p('Mesh generated')
 
@@ -594,8 +604,7 @@ def main():
         jt_publishers[robot_name] = rospy.Publisher('/' + robot_name + '/joint_target', JointState, queue_size=1)
         green_p(' - ' + js_topic)
 
-    # physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
-    physicsClient = p.connect(p.DIRECT)  # or p.DIRECT for non-graphical version
+    physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
 
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     planeId = p.loadURDF("plane.urdf")
@@ -1301,11 +1310,8 @@ def main():
         simulation_time_msg = rospy.Time(simulation_time[0])
         time_pub.publish(simulation_time_msg)
         elapsed = time.time() - now
-#        red_p(str(elapsed))
-#        green_p(str(1 / elapsed))
         if (desidered_real_step_time - elapsed > 0):
             time.sleep(desidered_real_step_time - elapsed)
-#        print('Time ratio: ' + str(simulation_step_time / (time.time() - now)))
         now = time.time()
 
     p.disconnect()
