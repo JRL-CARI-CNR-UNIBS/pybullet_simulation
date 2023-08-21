@@ -92,6 +92,9 @@ class JointTargetSubscriber:
                                             controlMode=p.TORQUE_CONTROL,
                                             force=data.effort[joint_id])
                 self.joint_state_lock.acquire()
+                print('data.position: ' + data.position[joint_id])
+                print('joint_state: ' + self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
+                print(data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
                 self.pos_compensation[data.name[joint_id]] += self.joint_control_integral_gain[self.robot_name][self.controlled_joint_name[self.robot_name].index(data.name[joint_id])] * self.simulation_step_time *(data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
                 self.joint_state_lock.release()
         self.control_mode_lock.release()
