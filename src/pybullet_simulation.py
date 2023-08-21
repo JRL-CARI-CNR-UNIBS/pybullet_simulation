@@ -74,6 +74,10 @@ class JointTargetSubscriber:
 
     def jointTargetSubscriber(self, data):
         self.control_mode_lock.acquire()
+        data_position_str    = 'data position:    ['
+        joint_state_str      = 'joint state:      ['
+        pos_compensation_str = 'pos_compensation: ['
+        pos_diff_str         = 'pos_diff:         ['
         for joint_id in range(len(data.name)):
             if data.name[joint_id] in self.controlled_joint_name[self.robot_name]:
                 if (self.joint_control_mode[self.robot_name] == 'position'):
@@ -92,11 +96,21 @@ class JointTargetSubscriber:
                                             controlMode=p.TORQUE_CONTROL,
                                             force=data.effort[joint_id])
                 self.joint_state_lock.acquire()
-                print('data.position: ' + data.position[joint_id])
-                print('joint_state: ' + self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
-                print(data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
+                data_position_str = data_position_str + str(round(data.position[joint_id],5)) + ', '
+                joint_state_str = joint_state_str + str(round(self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0],5)) + ', '
+                pos_diff_str = pos_diff_str + str(round((data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0]), 5) ) + ', '
                 self.pos_compensation[data.name[joint_id]] += self.joint_control_integral_gain[self.robot_name][self.controlled_joint_name[self.robot_name].index(data.name[joint_id])] * self.simulation_step_time *(data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
+                pos_compensation_str = pos_compensation_str + str(round(self.pos_compensation[data.name[joint_id]],5)) + ', '
                 self.joint_state_lock.release()
+        data_position_str = data_position_str + ']'
+        joint_state_str = joint_state_str + ']'
+        pos_compensation_str = pos_compensation_str + ']'
+        pos_diff_str = pos_diff_str + ']'
+        print(data_position_str)
+        print(joint_state_str)
+        print(pos_diff_str)
+        print(pos_compensation_str)
+        print(' ')
         self.control_mode_lock.release()
 
 
