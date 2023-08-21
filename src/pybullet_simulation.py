@@ -50,68 +50,83 @@ def cyan_p(msg):
 
 
 class JointTargetSubscriber:
-    def __init__(self, robot_id, joint_name_to_index, joint_effort_limits, joint_control_mode, controlled_joint_name, robot_name, jt_topic, control_mode_lock, simulation_step_time, joint_states, joint_state_lock, joint_control_integral_gain):
-        self.robot_id              = robot_id
-        self.joint_name_to_index   = joint_name_to_index
-        self.joint_effort_limits   = joint_effort_limits
-        self.joint_control_mode    = joint_control_mode
-        self.controlled_joint_name = controlled_joint_name
+    def __init__(self, joint_targets, joint_targets_lock, robot_name, jt_topic):
         self.robot_name            = robot_name
         self.jt_topic              = jt_topic
-        self.control_mode_lock     = control_mode_lock
-        self.simulation_step_time  = simulation_step_time
-        self.joint_states          = joint_states
-        self.joint_state_lock      = joint_state_lock
-        self.pos_compensation = {}
-        self.joint_control_integral_gain = joint_control_integral_gain
-
-        for joint_name in self.controlled_joint_name[self.robot_name]:
-            self.pos_compensation[joint_name] = 0.0
+        self.joint_targets         = joint_targets
+        self.joint_targets_lock    = joint_targets_lock
 
         rospy.Subscriber(self.jt_topic,
                          JointState,
                          self.jointTargetSubscriber)
 
     def jointTargetSubscriber(self, data):
-        self.control_mode_lock.acquire()
-        data_position_str    = 'data position:    ['
-        joint_state_str      = 'joint state:      ['
-        pos_compensation_str = 'pos_compensation: ['
-        pos_diff_str         = 'pos_diff:         ['
+        self.joint_targets_lock.acquire()
+
         for joint_id in range(len(data.name)):
-            if data.name[joint_id] in self.controlled_joint_name[self.robot_name]:
-                if (self.joint_control_mode[self.robot_name] == 'position'):
-                    p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
-                                            jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
-                                            controlMode=p.POSITION_CONTROL,
-                                            targetPosition=data.position[joint_id] + self.pos_compensation[data.name[joint_id]])
-                elif (self.joint_control_mode[self.robot_name] == 'velocity'):
-                    p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
-                                            jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
-                                            controlMode=p.VELOCITY_CONTROL,
-                                            targetVelocity=data.velocity[joint_id])
-                elif (self.joint_control_mode[self.robot_name] == 'torque'):
-                    p.setJointMotorControl2(bodyIndex=self.robot_id[self.robot_name],
-                                            jointIndex=self.joint_name_to_index[self.robot_name][data.name[joint_id]],
-                                            controlMode=p.TORQUE_CONTROL,
-                                            force=data.effort[joint_id])
-                self.joint_state_lock.acquire()
-                data_position_str = data_position_str + str(round(data.position[joint_id],5)) + ', '
-                joint_state_str = joint_state_str + str(round(self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0],5)) + ', '
-                pos_diff_str = pos_diff_str + str(round((data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0]), 5) ) + ', '
-                self.pos_compensation[data.name[joint_id]] += self.joint_control_integral_gain[self.robot_name][self.controlled_joint_name[self.robot_name].index(data.name[joint_id])] * self.simulation_step_time *(data.position[joint_id] - self.joint_states[self.robot_name][self.joint_name_to_index[self.robot_name][data.name[joint_id]]][0])
-                pos_compensation_str = pos_compensation_str + str(round(self.pos_compensation[data.name[joint_id]],5)) + ', '
-                self.joint_state_lock.release()
-        data_position_str = data_position_str + ']'
-        joint_state_str = joint_state_str + ']'
-        pos_compensation_str = pos_compensation_str + ']'
-        pos_diff_str = pos_diff_str + ']'
-        print(data_position_str)
-        print(joint_state_str)
-        print(pos_diff_str)
-        print(pos_compensation_str)
-        print(' ')
-        self.control_mode_lock.release()
+            self.joint_targets[self.robot_name][data.name[joint_id]]['position'] = data.position[joint_id]
+            self.joint_targets[self.robot_name][data.name[joint_id]]['velocity'] = data.velocity[joint_id]
+            self.joint_targets[self.robot_name][data.name[joint_id]]['effort'] = data.effort[joint_id]
+        self.joint_targets_lock.release()
+
+
+def joint_target_integration(robot_names, robot_id, joint_control_mode, controlled_joint_name, joint_states, joint_state_lock, joint_targets, joint_targets_lock, joint_control_integral_gain, joint_name_to_index, control_mode_lock, simulation_step_time):
+
+    pos_compensation = {}
+    rate = rospy.Rate(2 / simulation_step_time)
+
+    for robot_name in robot_names:
+        pos_compensation[robot_name] = {}
+        for joint_name in joint_name_to_index[robot_name].keys():
+            pos_compensation[robot_name][joint_name] = 0.0
+
+    while not rospy.is_shutdown():
+        control_mode_lock.acquire()
+        for robot_name in robot_names:
+            target_position_str  = 'target_position:  ['
+            joint_state_str      = 'joint state:      ['
+            pos_compensation_str = 'pos_compensation: ['
+            pos_diff_str         = 'pos_diff:         ['
+
+            for joint_name in joint_name_to_index[robot_name].keys():
+                if joint_name in controlled_joint_name[robot_name]:
+                    if (joint_control_mode[robot_name] == 'position'):
+                        p.setJointMotorControl2(bodyIndex=robot_id[robot_name],
+                                                jointIndex=joint_name_to_index[robot_name][joint_name],
+                                                controlMode=p.POSITION_CONTROL,
+                                                targetPosition=joint_targets[robot_name][joint_name]['position'] + pos_compensation[robot_name][joint_name])
+                    elif (joint_control_mode[robot_name] == 'velocity'):
+                        p.setJointMotorControl2(bodyIndex=robot_id[robot_name],
+                                                jointIndex=joint_name_to_index[robot_name][joint_name],
+                                                controlMode=p.VELOCITY_CONTROL,
+                                                targetVelocity=joint_targets[robot_name][joint_name]['velocity'])
+                    elif (joint_control_mode[robot_name] == 'torque'):
+                        p.setJointMotorControl2(bodyIndex=robot_id[robot_name],
+                                                jointIndex=joint_name_to_index[robot_name][joint_name],
+                                                controlMode=p.TORQUE_CONTROL,
+                                                force=joint_targets[robot_name][joint_name]['effort'])
+                    joint_state_lock.acquire()
+                    target_position_str = target_position_str + str(round(joint_targets[robot_name][joint_name]['position'], 5)) + ', '
+                    joint_state_str = joint_state_str + str(round(joint_states[robot_name][joint_name_to_index[robot_name][joint_name]][0], 5)) + ', '
+                    pos_diff_str = pos_diff_str + str(round((joint_targets[robot_name][joint_name]['position'] - joint_states[robot_name][joint_name_to_index[robot_name][joint_name]][0]), 5)) + ', '
+                    pos_compensation[robot_name][joint_name] += joint_control_integral_gain[robot_name][controlled_joint_name[robot_name].index(joint_name)] * (simulation_step_time / 2) * (joint_targets[robot_name][joint_name]['position'] - joint_states[robot_name][joint_name_to_index[robot_name][joint_name]][0])
+                    pos_compensation_str = pos_compensation_str + str(round(pos_compensation[robot_name][joint_name], 5)) + ', '
+                    joint_state_lock.release()
+            target_position_str = target_position_str + ']'
+            joint_state_str = joint_state_str + ']'
+            pos_compensation_str = pos_compensation_str + ']'
+            pos_diff_str = pos_diff_str + ']'
+            if controlled_joint_name[robot_name]:
+                print(robot_name)
+                print(target_position_str)
+                print(joint_state_str)
+                print(pos_diff_str)
+                print(pos_compensation_str)
+                print(' ')
+        control_mode_lock.release()
+
+        rate.sleep()
+
 
 
 def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_name, joint_control_mode, joint_effort_limits, control_mode_lock):
@@ -576,9 +591,11 @@ def main():
     scenes_lock = Lock()
     objects_lock = Lock()
     joint_state_lock = Lock()
+    joint_targets_lock = Lock()
 
     use_moveit = sys.argv[1]
 
+    current_robots_target_configuration = {}
     controlled_joint_name = {}
     gear_constraint_to_joint = {}
     robot_id = {}
@@ -587,6 +604,7 @@ def main():
     joint_control_integral_gain = {}
     joint_name_to_index = {}
     joint_states = {}
+    joint_targets = {}
     state_js = {}
     joint_control_mode = {}
     joint_effort_limits = {}
@@ -764,6 +782,8 @@ def main():
                 yellow_p('No param /' + robot_name + '/start_configuration')
                 for index in range(len(controlled_joint_name[robot_name])):
                     start_configuration[controlled_joint_name[robot_name][index]] = 0.0
+
+            current_robots_target_configuration[robot_name] = start_configuration
 
             if (file_type == 'xacro'):
                 os.system("rosrun xacro xacro " + xacro_path + " robot_name:='" + robot_name + "' > " + urdf_path)
@@ -1036,34 +1056,26 @@ def main():
 
             jt_topic = '/' + robot_name + '/joint_target'
 
-            jt_subscriber[robot_name] = JointTargetSubscriber(robot_id,
-                                                              joint_name_to_index,
-                                                              joint_effort_limits,
-                                                              joint_control_mode,
-                                                              controlled_joint_name,
-                                                              robot_name,
-                                                              jt_topic,
-                                                              control_mode_lock,
-                                                              simulation_step_time,
-                                                              joint_states,
-                                                              joint_state_lock,
-                                                              joint_control_integral_gain)
             joint_state_lock.acquire()
             joint_states[robot_name] = p.getJointStates(robot_id[robot_name], range(p.getNumJoints(robot_id[robot_name])))
             joint_state_lock.release()
+            joint_targets[robot_name] = {}
             for joint_name in joint_name_to_index[robot_name].keys():
                 if joint_name in controlled_joint_name[robot_name]:
+                    joint_targets[robot_name][joint_name] = {}
                     if (joint_control_mode[robot_name] == 'position'):
                         p.setJointMotorControl2(robot_id[robot_name],
                                                 joint_name_to_index[robot_name][joint_name],
                                                 p.POSITION_CONTROL,
                                                 targetPosition=start_configuration[joint_name])
-                        cyan_p(joint_name + ' joint set with position control, target position = 0.0')
+                        joint_targets[robot_name][joint_name]['position'] = start_configuration[joint_name]
+                        cyan_p(joint_name + ' joint set with position control, target position = ' + str(start_configuration[joint_name]))
                     elif (joint_control_mode[robot_name] == 'velocity'):
                         p.setJointMotorControl2(robot_id[robot_name],
                                                 joint_name_to_index[robot_name][joint_name],
                                                 p.VELOCITY_CONTROL,
                                                 targetVelocity=0.0)
+                        joint_targets[robot_name][joint_name]['velocity'] = 0.0
                         cyan_p(joint_name + ' joint set with velocity control, target velocity = 0.0')
                     elif (joint_control_mode[robot_name] == 'torque'):
                         p.setJointMotorControl2(robot_id[robot_name],
@@ -1074,6 +1086,7 @@ def main():
                                                 joint_name_to_index[robot_name][joint_name],
                                                 p.TORQUE_CONTROL,
                                                 force=0.0)
+                        joint_targets[robot_name][joint_name]['effort'] = 0.0
                         cyan_p(joint_name + ' joint set with torque control, target force = 0.0')
                     else:
                         red_p('/' + robot_name + '/joint_control_mode not in existing types')
@@ -1084,6 +1097,12 @@ def main():
                                             p.VELOCITY_CONTROL,
                                             force=0.0)
                     green_p(joint_name + ' joint set with velocity control, max force = 0.0')
+
+            jt_subscriber[robot_name] = JointTargetSubscriber(joint_targets,
+                                                              joint_targets_lock,
+                                                              robot_name,
+                                                              jt_topic)
+
         else:
             red_p('/' + robot_name + ' param not found')
             raise SystemExit
@@ -1306,6 +1325,20 @@ def main():
                                                                scenes_lock,
                                                                joint_state_lock))
     js_pub_thread.start()
+
+    jt_integ_thread = Thread(target=joint_target_integration, args=(robot_names,
+                                                                    robot_id,
+                                                                    joint_control_mode,
+                                                                    controlled_joint_name,
+                                                                    joint_states,
+                                                                    joint_state_lock,
+                                                                    joint_targets,
+                                                                    joint_targets_lock,
+                                                                    joint_control_integral_gain,
+                                                                    joint_name_to_index,
+                                                                    control_mode_lock,
+                                                                    simulation_step_time))
+    jt_integ_thread.start()
 
     sw_pub_thread = Thread(target=sensor_wrench_publisher, args=(robot_id,
                                                                  sw_publishers,
