@@ -166,9 +166,9 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
     return 'true'
 
 
-def spawn_model(srv, objects, tf_pub_thread, scenes, use_moveit, objects_lock, scenes_lock, pybullet_ns):
-    if not tf_pub_thread.is_alive():
-        tf_pub_thread.start()
+def spawn_model(srv, objects, obj_tf_pub_thread, scenes, use_moveit, objects_lock, scenes_lock, pybullet_ns):
+    if not obj_tf_pub_thread.is_alive():
+        obj_tf_pub_thread.start()
     if not srv.model_name:
         red_p('Name list is empty')
         return 'false'
@@ -263,24 +263,24 @@ def spawn_model(srv, objects, tf_pub_thread, scenes, use_moveit, objects_lock, s
         if (use_moveit == 'true'):
             red_p('Spawn in rviz')
             red_p(mesh_path)
-            mesh_file = pyassimp.load(mesh_path)
-            red_p('Mesh loaded')
             mesh = Mesh()
-            for face in mesh_file.meshes[0].faces:
-                triangle = MeshTriangle()
-                if len(face) == 3:
-                    triangle.vertex_indices = [face[0],
-                                               face[1],
-                                               face[2]]
-                mesh.triangles.append(triangle)
-            for vertex in mesh_file.meshes[0].vertices:
-                point = Point()
-                point.x = vertex[0]
-                point.y = vertex[1]
-                point.z = vertex[2]
-                mesh.vertices.append(point)
+            with pyassimp.load(mesh_path) as mesh_file:
+                red_p('Mesh loaded')
+                for face in mesh_file.meshes[0].faces:
+                    triangle = MeshTriangle()
+                    if len(face) == 3:
+                        triangle.vertex_indices = [face[0],
+                                                   face[1],
+                                                   face[2]]
+                    mesh.triangles.append(triangle)
+                for vertex in mesh_file.meshes[0].vertices:
+                    point = Point()
+                    point.x = vertex[0]
+                    point.y = vertex[1]
+                    point.z = vertex[2]
+                    mesh.vertices.append(point)
             red_p('Mesh filled')
-            pyassimp.release(mesh_file)
+#            pyassimp.release(mesh_file)
             red_p('Mesh generated')
 
             pose = Pose()
@@ -444,6 +444,9 @@ def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offse
         return 'false'
     if joint_name not in sw_publishers[robot_name]:
         red_p('The joint ' + joint_name + ' do not has a sensor')
+        red_p('The sensorized joints are:')
+        for sensorized_joint_name in sw_publishers[robot_name].keys():
+            red_p('  ' + sensorized_joint_name)
         return 'false'
     sensor_offset_lock.acquire()
     sensor_wrench = p.getJointStates(robot_id[robot_name], [joint_name_to_index[robot_name][joint_name]])
@@ -457,9 +460,9 @@ def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offse
     return 'true'
 
 
-def tf_publisher(objects, scenes, use_moveit, objects_lock, scenes_lock):
-    if rospy.has_param('object_tf_publish_rate'):
-        tf_publish_rate = rospy.get_param('object_tf_publish_rate')
+def objects_tf_publisher(pybullet_ns, objects, scenes, use_moveit, objects_lock, scenes_lock):
+    if rospy.has_param('/' + pybullet_ns + '/object_tf_publish_rate'):
+        tf_publish_rate = rospy.get_param('/' + pybullet_ns + '/object_tf_publish_rate')
         green_p('object_tf_publish_rate: ' + str(tf_publish_rate))
     else:
         tf_publish_rate = 250
@@ -473,7 +476,9 @@ def tf_publisher(objects, scenes, use_moveit, objects_lock, scenes_lock):
         if (current_time != rospy.Time.now().to_sec()):
             objects_lock.acquire()
             for object_name in objects:
+#                print('object_name: '+object_name)
                 if 'object_id' in objects[object_name]:
+#                    print('object_id: '+object_name)
                     pose = p.getBasePositionAndOrientation(objects[object_name]['object_id'])
                     br.sendTransform((pose[0][0], pose[0][1], pose[0][2]),
                                      (pose[1][0], pose[1][1], pose[1][2], pose[1][3]),
@@ -492,21 +497,23 @@ def tf_publisher(objects, scenes, use_moveit, objects_lock, scenes_lock):
                                         objects[object_name]['object'].link_name = attached_link
                                         objects[object_name]['object'].touch_links = touch_links
                                         if not objects[object_name]['attached']:
+                                            rospy.logerr("Attach")
                                             scenes[0].robot_state.attached_collision_objects.append(objects[object_name]['object'])
                                             scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
-                                            red_p('Added attached obj')
+                                            rospy.loginfo('Added attached obj')
                                             objects[object_name]['attached'] = True
                                     else:
-                                        if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
-                                            scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
-                                            objects[object_name]['object'].object.operation = objects[object_name]['object'].object.REMOVE
-                                            scenes[0].robot_state.attached_collision_objects.append(objects[object_name]['object'])
-                                            apply_scene_clnt.call(scenes[0])
-                                            scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
-                                            objects[object_name]['object'].object.operation = objects[object_name]['object'].object.ADD
-                                            scenes[0].world.collision_objects.append(objects[object_name]['object'].object)
-                                            red_p('Removed attached obj')
-                                            objects[object_name]['attached'] = False
+                                        if objects[object_name]['attached']:
+                                            if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
+                                                scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
+                                                objects[object_name]['object'].object.operation = objects[object_name]['object'].object.REMOVE
+                                                scenes[0].robot_state.attached_collision_objects.append(objects[object_name]['object'])
+                                                apply_scene_clnt.call(scenes[0])
+                                                scenes[0].robot_state.attached_collision_objects.remove(objects[object_name]['object'])
+                                                objects[object_name]['object'].object.operation = objects[object_name]['object'].object.ADD
+                                                scenes[0].world.collision_objects.append(objects[object_name]['object'].object)
+                                                rospy.loginfo('Removed attached obj')
+                                                objects[object_name]['attached'] = False
                         apply_scene_clnt.call(scenes[0])
                         scenes_lock.release()
             objects_lock.release()
@@ -649,10 +656,10 @@ def main():
         jt_publishers[robot_name] = rospy.Publisher('/' + robot_name + '/joint_target', JointState, queue_size=1)
         green_p(' - ' + js_topic)
 
-    physicsClient = p.connect(p.GUI)  # or p.DIRECT for non-graphical version
+    p.connect(p.GUI)  # or p.DIRECT for non-graphical version
 
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
-    planeId = p.loadURDF("plane.urdf")
+    p.loadURDF("plane_transparent.urdf")
     p.setGravity(0, 0, -9.8)
     if rospy.has_param('/' + pybullet_ns + '/camera_init'):
         camera_init = rospy.get_param('/' + pybullet_ns + '/camera_init')
@@ -1337,14 +1344,14 @@ def main():
     scene = PlanningScene()
     scenes.append(scene)
 
-    tf_pub_thread = Thread(target=tf_publisher, args=(objects, scenes, use_moveit, objects_lock, scenes_lock))
+    obj_tf_pub_thread = Thread(target=objects_tf_publisher, args=(pybullet_ns, objects, scenes, use_moveit, objects_lock, scenes_lock))
 
     rospy.Service('pybullet_spawn_model',
                   SpawnModel,
                   lambda msg:
                       spawn_model(msg,
                                   objects,
-                                  tf_pub_thread,
+                                  obj_tf_pub_thread,
                                   scenes,
                                   use_moveit,
                                   objects_lock,
@@ -1403,8 +1410,8 @@ def main():
 
     sw_pub_thread.start()
 
-    collision_thread = Thread(target=collision_check, args=(simulation_step_time,))
-    collision_thread.start()
+#    collision_thread = Thread(target=collision_check, args=(simulation_step_time,))
+#    collision_thread.start()
 
     time.sleep(0.1)
 
@@ -1425,8 +1432,9 @@ def main():
 
     green_p('Waiting for threads...')
     js_pub_thread.join()
-    tf_pub_thread.join()
+    obj_tf_pub_thread.join()
     sw_pub_thread.join()
+#    collision_thread.join()
 
 
 if __name__ == '__main__':
