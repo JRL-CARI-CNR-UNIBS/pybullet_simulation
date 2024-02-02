@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>pybullet_utils</name>
+  <name>pybullet_simulation</name>
   <version>0.0.0</version>
-  <description>The pybullet_utils package</description>
+  <description>The pybullet_simulation package</description>
 
-  <maintainer email="gauss@todo.todo">gauss</maintainer>
+  <maintainer email="m.delledonne002@unibs.it">MicheleDelledonne</maintainer>
 
   <license>TODO</license>
 

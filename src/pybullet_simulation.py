@@ -324,7 +324,11 @@ def spawn_model(srv, objects, obj_tf_pub_thread, scenes, use_moveit, objects_loc
                                   PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
                                   PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
             scenes_lock.acquire()
-            scenes[0] = get_scene_clnt(req).scene
+            scenes[0] = get_scene_clnt.call(req).scene
+            scenes[0].robot_state.joint_state.name     = []
+            scenes[0].robot_state.joint_state.position = []
+            scenes[0].robot_state.joint_state.velocity = []
+            scenes[0].robot_state.joint_state.effort   = []
             scenes[0].is_diff = True
             scenes[0].robot_state.is_diff = True
             scenes[0].world.collision_objects.append(c_obj)
