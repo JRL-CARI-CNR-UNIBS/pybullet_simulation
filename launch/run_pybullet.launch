@@ -3,5 +3,5 @@
 <launch>
   <param name="use_sim_time" type="bool" value="true"/>
   <arg name="use_moveit" default="false" />
-  <node name="pybullet_simulation" pkg="pybullet_simulation" type="pybullet_simulation.py" output="screen" args="$(arg use_moveit)"/>
+  <node name="pybullet_simulation" pkg="pybullet_simulation" type="pybullet_sim_server.py" output="screen" args="$(arg use_moveit)"/>
 </launch>

@@ -1,6 +1,6 @@
 string[] object_name
 string[] model_name
 geometry_msgs/Pose[] pose
-bool fixed
+bool[] fixed
 ---
 string result
