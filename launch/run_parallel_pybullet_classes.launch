@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+
+<launch>
+  <param name="use_sim_time" type="bool" value="true"/>
+  <arg name="use_moveit" default="false" />
+  <arg name="use_gui" default="true" />
+  <arg name="word_number" default="2" />
+  <node name="parallel_pybullet_simulation" pkg="pybullet_simulation" type="parallel_pybullet_sim_class.py" output="screen" args="$(arg use_moveit) $(arg use_gui) $(arg word_number)"/>
+</launch>

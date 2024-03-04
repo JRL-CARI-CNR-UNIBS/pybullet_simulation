@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+
+<launch>
+  <param name="use_sim_time" type="bool" value="true"/>
+  <arg name="use_moveit" default="false" />
+  <arg name="use_gui" default="true" />
+  <node name="single_pybullet_simulation" pkg="pybullet_simulation" type="single_pybullet_sim_class.py" output="screen" args="$(arg use_moveit) $(arg use_gui)"/>
+</launch>
