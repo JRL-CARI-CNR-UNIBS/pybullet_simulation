@@ -2,7 +2,9 @@
 
 import sys
 import os
-import pybullet as p
+#import pybullet as p
+import pybullet
+import pybullet_utils.bullet_client as bc
 import pybullet_data
 import rospy
 import rospkg
@@ -31,7 +33,7 @@ from pybullet_simulation.srv import SensorReset
 
 
 class JointTargetSubscriber:
-    def __init__(self, joint_target, joint_target_lock, robot_name, jt_topic):
+    def __init__(self, p, joint_target, joint_target_lock, robot_name, jt_topic):
         self.robot_name            = robot_name
         self.jt_topic              = jt_topic
         self.joint_target         = joint_target
@@ -52,7 +54,19 @@ class JointTargetSubscriber:
         self.joint_target_lock.release()
 
 
-def joint_target_integration(robot_names, robot_id, joint_control_mode, controlled_joint_name, joint_states, joint_state_lock, joint_target, joint_target_lock, joint_control_integral_gain, joint_name_to_index, control_mode_lock, simulation_step_time):
+def joint_target_integration(p,
+                             robot_names,
+                             robot_id,
+                             joint_control_mode,
+                             controlled_joint_name,
+                             joint_states,
+                             joint_state_lock,
+                             joint_target,
+                             joint_target_lock,
+                             joint_control_integral_gain,
+                             joint_name_to_index,
+                             control_mode_lock,
+                             simulation_step_time):
 
     pos_compensation = {}
     rate = rospy.Rate(2 / simulation_step_time)
@@ -103,7 +117,14 @@ def joint_target_integration(robot_names, robot_id, joint_control_mode, controll
         rate.sleep()
 
 
-def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_name, joint_control_mode, joint_effort_limits, control_mode_lock):
+def change_control_mode(srv,
+                        p,
+                        robot_id,
+                        joint_name_to_index,
+                        controlled_joint_name,
+                        joint_control_mode,
+                        joint_effort_limits,
+                        control_mode_lock):
     control_mode_lock.acquire()
     for robot_name in srv.robot_names:
         if robot_name in robot_id.keys():
@@ -147,7 +168,14 @@ def change_control_mode(srv, robot_id, joint_name_to_index, controlled_joint_nam
     return 'true'
 
 
-def spawn_model(srv, objects, obj_tf_pub_thread, scenes, use_moveit, objects_lock, scenes_lock, pybullet_ns):
+def spawn_model(srv,
+                p,
+                objects,
+                obj_tf_pub_thread,
+                scenes, use_moveit,
+                objects_lock,
+                scenes_lock,
+                pybullet_ns):
     if not obj_tf_pub_thread.is_alive():
         obj_tf_pub_thread.start()
     if not srv.model_name:
@@ -321,7 +349,13 @@ def spawn_model(srv, objects, obj_tf_pub_thread, scenes, use_moveit, objects_loc
     return 'true'
 
 
-def delete_model(srv, objects, scenes, use_moveit, objects_lock, scenes_lock):
+def delete_model(srv,
+                 p,
+                 objects,
+                 scenes,
+                 use_moveit,
+                 objects_lock,
+                 scenes_lock):
     for object_name in srv.object_name:
         if object_name not in objects.keys():
             print(objects.keys())
@@ -351,7 +385,17 @@ def delete_model(srv, objects, scenes, use_moveit, objects_lock, scenes_lock):
     return 'true'
 
 
-def joint_state_publisher(robot_id, js_publishers, joint_states, controlled_joint_name, joint_state_publish_rate, joint_name_to_index, internal_constraint_to_joint, scenes, scenes_lock, joint_state_lock):
+def joint_state_publisher(p,
+                          robot_id,
+                          js_publishers,
+                          joint_states,
+                          controlled_joint_name,
+                          joint_state_publish_rate,
+                          joint_name_to_index,
+                          internal_constraint_to_joint,
+                          scenes,
+                          scenes_lock,
+                          joint_state_lock):
     name = []
     position = []
     velocity = []
@@ -392,7 +436,13 @@ def joint_state_publisher(robot_id, js_publishers, joint_states, controlled_join
         rate.sleep()
 
 
-def sensor_wrench_publisher(robot_id, sw_publishers, joint_name_to_index, joint_state_publish_rate, sensor_offset, sensor_offset_lock):
+def sensor_wrench_publisher(p,
+                            robot_id,
+                            sw_publishers,
+                            joint_name_to_index,
+                            joint_state_publish_rate,
+                            sensor_offset,
+                            sensor_offset_lock):
     rate = rospy.Rate(joint_state_publish_rate)
     sw_msg = WrenchStamped()
     while not rospy.is_shutdown():
@@ -417,7 +467,13 @@ def sensor_wrench_publisher(robot_id, sw_publishers, joint_name_to_index, joint_
         rate.sleep()
 
 
-def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offset, sensor_offset_lock):
+def sensor_reset(srv,
+                 p,
+                 robot_id,
+                 sw_publishers,
+                 joint_name_to_index,
+                 sensor_offset,
+                 sensor_offset_lock):
     robot_name = srv.robot_name
     joint_name = srv.joint_name
     if robot_name not in sw_publishers:
@@ -441,7 +497,14 @@ def sensor_reset(srv, robot_id, sw_publishers, joint_name_to_index, sensor_offse
     return 'true'
 
 
-def objects_tf_publisher(pybullet_ns, objects, scenes, use_moveit, objects_lock, scenes_lock):
+def objects_tf_publisher(p,
+                         pybullet_ns,
+                         objects,
+                         scenes,
+                         use_moveit,
+                         objects_lock,
+                         scenes_lock,
+                         tf_published):
     if rospy.has_param('/' + pybullet_ns + '/object_tf_publish_rate'):
         tf_publish_rate = rospy.get_param('/' + pybullet_ns + '/object_tf_publish_rate')
         rospy.loginfo('object_tf_publish_rate: ' + str(tf_publish_rate))
@@ -498,10 +561,19 @@ def objects_tf_publisher(pybullet_ns, objects, scenes, use_moveit, objects_lock,
                         scenes_lock.release()
             objects_lock.release()
             current_time = rospy.Time.now().to_sec()
+        tf_published[0] = True
         rate.sleep()
 
 
-def save_state(srv, state_id, joint_states, state_js, joint_state_lock, scenes, state_scene, scenes_lock):
+def save_state(srv,
+               p,
+               state_id,
+               joint_states,
+               state_js,
+               joint_state_lock,
+               scenes,
+               state_scene,
+               scenes_lock):
     if not srv.state_name:
         rospy.logerr('Name is empty')
         return 'false'
@@ -521,7 +593,19 @@ def save_state(srv, state_id, joint_states, state_js, joint_state_lock, scenes, 
     return 'true'
 
 
-def restore_state(srv, state_id, state_js, joint_name_to_index, jt_publishers, scenes, state_scene, scenes_lock, objects, use_moveit, objects_lock):
+def restore_state(srv,
+                  p,
+                  state_id,
+                  state_js,
+                  joint_name_to_index,
+                  jt_publishers,
+                  scenes,
+                  state_scene,
+                  scenes_lock,
+                  objects,
+                  use_moveit,
+                  objects_lock,
+                  tf_published):
     objects_lock.acquire()
     if not srv.state_name:
         rospy.logerr('Name is empty')
@@ -557,25 +641,18 @@ def restore_state(srv, state_id, state_js, joint_name_to_index, jt_publishers, s
         jt_publishers[robot_name].publish(jt_msg)
     p.restoreState(state_id[srv.state_name])
 
-#    scenes_lock.acquire()
-#    for attached_obj in scenes[0].robot_state.attached_collision_objects:
-#        check = False
-#        for att_obj in state_scene[srv.state_name].robot_state.attached_collision_objects:
-#            print('Current: '+att_obj.object.id+'. Initial: '+attached_obj.object.id)
-#            if att_obj.object.id == attached_obj.object.id:
-#                check = True
-#        if not check:
-#            print('Set /' + attached_obj.header.frame_id + '/attached : False')
-#            rospy.set_param('/' + attached_obj.header.frame_id + '/attached',False)
-#    scenes_lock.release()
-
     rospy.loginfo('state ' + srv.state_name + ' restored')
+    tf_published[0] = False
     objects_lock.release()
 
+    while not tf_published[0]:
+        rospy.sleep(0.1)
     return 'true'
 
 
-def delete_state(srv, state_id):
+def delete_state(srv,
+                 p,
+                 state_id):
     if not srv.state_name:
         rospy.logwarn('Name list is empty')
         return 'true'
@@ -587,7 +664,7 @@ def delete_state(srv, state_id):
             state_id.pop(state_name)
     return 'true'
 
-def collision_check(simulation_step_time):
+def collision_check(p, simulation_step_time):
     rate = rospy.Rate(2 / simulation_step_time)
     number_normal_contact = len(p.getContactPoints())
 
@@ -611,6 +688,9 @@ def main():
     joint_target_lock = Lock()
 
     use_moveit = sys.argv[1]
+    use_guy = sys.argv[2]
+    tf_published = []
+    tf_published.append(False)
 
     current_robots_target_configuration = {}
     controlled_joint_name = {}
@@ -634,7 +714,6 @@ def main():
     sensor_offset = {}
 
     rospy.init_node('pybullet_simulation')
-
     pybullet_ns = 'pybullet_simulation'
 
     robots = {}
@@ -666,7 +745,11 @@ def main():
         jt_publishers[robot_name] = rospy.Publisher('/' + robot_name + '/joint_target', JointState, queue_size=1)
         rospy.loginfo(' - ' + js_topic)
 
-    p.connect(p.GUI)  # or p.DIRECT for non-graphical version
+#    p.connect(p.GUI)  # or p.DIRECT for non-graphical version
+    if use_guy:
+        p = bc.BulletClient(connection_mode=pybullet.GUI)
+    else:
+        p = bc.BulletClient(connection_mode=pybullet.DIRECT)
 
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.loadURDF("plane_transparent.urdf")
@@ -1006,7 +1089,7 @@ def main():
                     rospy.loginfo('      max_force: ' + str(max_force))
                 else:
                     rospy.logwarn('      max_force: not set. Default:100')
-                    max_force = 100              
+                    max_force = 100
                 p.changeConstraint(constraint_id, maxForce=max_force)
         else:
             rospy.logwarn('No param /' + robot_name + '/constraints')
@@ -1151,7 +1234,7 @@ def main():
                                         force=0.0)
                 rospy.loginfo(joint_name + ' joint set with velocity control, max force = 0.0')
 
-        jt_subscriber[robot_name] = JointTargetSubscriber(joint_target,
+        jt_subscriber[robot_name] = JointTargetSubscriber(p, joint_target,
                                                           joint_target_lock,
                                                           robot_name,
                                                           jt_topic)
@@ -1461,7 +1544,7 @@ def main():
                     rospy.loginfo('      max_force: ' + str(max_force))
                 else:
                     rospy.logwarn('      max_force: not set. Default:100')
-                    max_force = 100              
+                    max_force = 100
                 p.changeConstraint(constraint_id, maxForce=max_force)
         else:
             rospy.logwarn('No param /' + env_part + '/constraints')
@@ -1687,6 +1770,7 @@ def main():
                   ChangeControlMode,
                   lambda msg:
                       change_control_mode(msg,
+                                          p,
                                           robot_id,
                                           joint_name_to_index,
                                           controlled_joint_name,
@@ -1696,19 +1780,39 @@ def main():
 
     rospy.Service('pybullet_save_state',
                   SaveState,
-                  lambda msg: save_state(msg, state_id, joint_states, state_js, joint_state_lock, scenes, state_scene,scenes_lock))
+                  lambda msg: save_state(msg,
+                                         p,
+                                         state_id,
+                                         joint_states,
+                                         state_js,
+                                         joint_state_lock,
+                                         scenes,
+                                         state_scene,scenes_lock))
 
     rospy.Service('pybullet_restore_state',
                   RestoreState,
-                  lambda msg: restore_state(msg, state_id, state_js, joint_name_to_index, jt_publishers, scenes, state_scene, scenes_lock, objects, use_moveit, objects_lock))
+                  lambda msg: restore_state(msg,
+                                            p,
+                                            state_id,
+                                            state_js,
+                                            joint_name_to_index,
+                                            jt_publishers,
+                                            scenes,
+                                            state_scene,
+                                            scenes_lock,
+                                            objects,
+                                            use_moveit,
+                                            objects_lock,
+                                            tf_published))
 
     rospy.Service('pybullet_delete_state',
                   DeleteState,
-                  lambda msg: delete_state(msg, state_id))
+                  lambda msg: delete_state(msg, p, state_id))
 
     rospy.Service('pybullet_sensor_reset',
                   SensorReset,
                   lambda msg: sensor_reset(msg,
+                                           p,
                                            robot_id,
                                            sw_publishers,
                                            joint_name_to_index,
@@ -1719,12 +1823,22 @@ def main():
     scene = PlanningScene()
     scenes.append(scene)
 
-    obj_tf_pub_thread = Thread(target=objects_tf_publisher, args=(pybullet_ns, objects, scenes, use_moveit, objects_lock, scenes_lock))
+    obj_tf_pub_thread = Thread(target=objects_tf_publisher,
+                               args=(p,
+                                     pybullet_ns,
+                                     objects,
+                                     scenes,
+                                     use_moveit,
+                                     objects_lock,
+                                     scenes_lock,
+                                     tf_published))
+    obj_tf_pub_thread.start()
 
     rospy.Service('pybullet_spawn_model',
                   SpawnModel,
                   lambda msg:
                       spawn_model(msg,
+                                  p,
                                   objects,
                                   obj_tf_pub_thread,
                                   scenes,
@@ -1736,6 +1850,7 @@ def main():
                   DeleteModel,
                   lambda msg:
                       delete_model(msg,
+                                   p,
                                    objects,
                                    scenes,
                                    use_moveit,
@@ -1750,7 +1865,7 @@ def main():
     simulation_time_msg = rospy.Time(simulation_time[0])
     time_pub.publish(simulation_time_msg)
 
-    js_pub_thread = Thread(target=joint_state_publisher, args=(robot_id,
+    js_pub_thread = Thread(target=joint_state_publisher, args=(p, robot_id,
                                                                js_publishers,
                                                                joint_states,
                                                                controlled_joint_name,
@@ -1762,7 +1877,7 @@ def main():
                                                                joint_state_lock))
     js_pub_thread.start()
 
-    jt_integ_thread = Thread(target=joint_target_integration, args=(robots.keys(),
+    jt_integ_thread = Thread(target=joint_target_integration, args=(p, robots.keys(),
                                                                     robot_id,
                                                                     joint_control_mode,
                                                                     controlled_joint_name,
@@ -1776,7 +1891,7 @@ def main():
                                                                     simulation_step_time))
     jt_integ_thread.start()
 
-    sw_pub_thread = Thread(target=sensor_wrench_publisher, args=(robot_id,
+    sw_pub_thread = Thread(target=sensor_wrench_publisher, args=(p, robot_id,
                                                                  sw_publishers,
                                                                  joint_name_to_index,
                                                                  joint_state_publish_rate,
@@ -1785,7 +1900,7 @@ def main():
 
     sw_pub_thread.start()
 
-#    collision_thread = Thread(target=collision_check, args=(simulation_step_time,))
+#    collision_thread = Thread(target=collision_check, args=(p, simulation_step_time,))
 #    collision_thread.start()
 
     time.sleep(0.1)
