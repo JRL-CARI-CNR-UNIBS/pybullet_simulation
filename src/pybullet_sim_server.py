@@ -746,9 +746,11 @@ def main():
         rospy.loginfo(' - ' + js_topic)
 
 #    p.connect(p.GUI)  # or p.DIRECT for non-graphical version
-    if use_guy:
+    if use_guy == 'true':
+        print('Use guy-----------------------------------------------------------')
         p = bc.BulletClient(connection_mode=pybullet.GUI)
     else:
+        print('No use guy-----------------------------------------------------------')
         p = bc.BulletClient(connection_mode=pybullet.DIRECT)
 
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
