@@ -357,31 +357,49 @@ def delete_model(srv,
                  objects_lock,
                  scenes_lock):
     for object_name in srv.object_name:
+        print('A1')
         if object_name not in objects.keys():
             print(objects.keys())
             rospy.logwarn(object_name + ' is not in the scene')
             continue
         id = objects[object_name]['object_id']
+        print('A2')
         if (use_moveit == 'true'):
             apply_scene_clnt = rospy.ServiceProxy('apply_planning_scene', ApplyPlanningScene)
+            print('A3')
             if objects[object_name]['object'] in scenes[0].robot_state.attached_collision_objects:
                 rospy.set_param('/' + object_name + '/attached',False)
+                print('A4')
                 while objects[object_name]['attached'] == True:
+                    print('A5')
                     rospy.sleep(0.1)
             scenes_lock.acquire()
+            print('A6')
             if objects[object_name]['object'].object in scenes[0].world.collision_objects:
                 scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
+                print('A7')
                 objects_lock.acquire()
+                print('A8')
                 objects[object_name]['object'].object.operation = objects[object_name]['object'].object.REMOVE
+                print('A9')
                 objects_lock.release()
+                print('A10')
                 scenes[0].world.collision_objects.append(objects[object_name]['object'].object)
+                print('A11')
                 apply_scene_clnt.call(scenes[0])
+                print('A12')
                 scenes[0].world.collision_objects.remove(objects[object_name]['object'].object)
+                print('A13')
             scenes_lock.release()
+            print('A14')
         objects_lock.acquire()
+        print('A15')
         del objects[object_name]
+        print('A16')
         objects_lock.release()
+        print('A17')
         p.removeBody(id)
+        print('A18')
     return 'true'
 
 
@@ -745,7 +763,6 @@ def main():
         jt_publishers[robot_name] = rospy.Publisher('/' + robot_name + '/joint_target', JointState, queue_size=1)
         rospy.loginfo(' - ' + js_topic)
 
-#    p.connect(p.GUI)  # or p.DIRECT for non-graphical version
     if use_guy == 'true':
         print('Use guy-----------------------------------------------------------')
         p = bc.BulletClient(connection_mode=pybullet.GUI)
@@ -796,7 +813,6 @@ def main():
         rospy.logerr('No param /joint_state_publish_rate')
         raise SystemExit
 
-    # p.setAdditionalSearchPath('')
 
     for robot_name in robots.keys():
         start_configuration = {}

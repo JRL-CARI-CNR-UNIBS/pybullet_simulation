@@ -1223,7 +1223,6 @@ class PybulletSim:
         #    collision_thread.join()
 
 
-
     def joint_target_integration(self):
 
         robot_names = self.robots.keys()
@@ -1751,6 +1750,7 @@ class PybulletSim:
                 self.p.removeState(self.state_id[state_name])
                 self.state_id.pop(state_name)
         return 'true'
+
 
     def collision_check(self):
         rate = rospy.Rate(2 / self.simulation_step_time)
