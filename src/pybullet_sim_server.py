@@ -408,6 +408,7 @@ def joint_state_publisher(p,
                           js_publishers,
                           joint_states,
                           controlled_joint_name,
+                          other_published_joints,
                           joint_state_publish_rate,
                           joint_name_to_index,
                           internal_constraint_to_joint,
@@ -432,7 +433,8 @@ def joint_state_publisher(p,
             for joint_name in joint_name_to_index[robot_name].keys():
                 if joint_name not in controlled_joint_name[robot_name]:
                     if joint_name not in internal_constraint_to_joint[robot_name].values():
-                        continue
+                        if joint_name not in other_published_joints[robot_name]:
+                            continue
                 name.append(joint_name)
                 position.append(joint_states[robot_name][joint_name_to_index[robot_name][joint_name]][0])
                 velocity.append(joint_states[robot_name][joint_name_to_index[robot_name][joint_name]][1])
@@ -712,6 +714,7 @@ def main():
 
     current_robots_target_configuration = {}
     controlled_joint_name = {}
+    other_published_joints = {}
     internal_constraint_to_joint = {}
     robot_id = {}
     objects = {}
@@ -889,6 +892,11 @@ def main():
         else:
             rospy.logwarn('No param /' + robot_name + '/controller_joint_name')
             controlled_joint_name[robot_name] = []
+        if 'other_published_joints' in robot_info:
+            other_published_joints[robot_name] = robot_info['other_published_joints']
+        else:
+            rospy.logwarn('No param /' + robot_name + '/other_published_joints')
+            other_published_joints[robot_name] = []
         if 'joint_control_integral_gain' in robot_info:
             joint_control_integral_gain[robot_name] = robot_info['joint_control_integral_gain']
         else:
@@ -1887,6 +1895,7 @@ def main():
                                                                js_publishers,
                                                                joint_states,
                                                                controlled_joint_name,
+                                                               other_published_joints,
                                                                joint_state_publish_rate,
                                                                joint_name_to_index,
                                                                internal_constraint_to_joint,
