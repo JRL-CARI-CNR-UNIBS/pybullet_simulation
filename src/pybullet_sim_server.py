@@ -16,7 +16,7 @@ import copy
 from moveit_msgs.srv import ApplyPlanningScene, GetPlanningScene
 from moveit_msgs.msg import CollisionObject, PlanningScene, PlanningSceneComponents, AttachedCollisionObject
 from geometry_msgs.msg import WrenchStamped, Pose, Point
-from shape_msgs.msg import MeshTriangle, Mesh
+from shape_msgs.msg import MeshTriangle, Mesh, SolidPrimitive
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
 from threading import Thread
@@ -199,6 +199,8 @@ def spawn_model(srv,
         rospy.loginfo('You want to spawn a ' + model_name + ' with the name ' + object_name)
 
         fixed = 0
+
+        mesh_scaling = [1,1,1]
         if rospy.has_param('/' + pybullet_ns + '/objects/' + model_name):
             model_info = rospy.get_param('/' + pybullet_ns + '/objects/' + model_name)
 
@@ -214,48 +216,131 @@ def spawn_model(srv,
                 file_type = 'urdf'
                 urdf_file_path = model_info['urdf_file_path']
                 rospy.loginfo('  urdf_file_path: ' + urdf_file_path)
-                urdf_path = folder_path + '/' + urdf_file_path
-                if (urdf_path.find('.urdf') == -1):
-                    rospy.logerr('  urdf_file_path do not has extension .urdf')
-                    raise SystemExit
+                urdf_path = folder_path + '/' + urdf_file_path + '.urdf'
             elif 'xacro_file_path' in model_info:
                 file_type = 'xacro'
                 xacro_file_path = model_info['xacro_file_path']
                 rospy.loginfo('  xacro_file_name: ' + xacro_file_path)
                 xacro_path = folder_path + '/' + xacro_file_path
-                if (xacro_path.find('.xacro') != -1):
-                    urdf_path = xacro_path.replace('.xacro', '.urdf')
-                else:
-                    rospy.logerr('  xacro_file_path do not has extension .xacro')
-                    raise SystemExit
+                urdf_path = xacro_path + str(numpy.random.randint(1, 1001)) + '.urdf'
+                xacro_path = xacro_path + '.xacro'
             else:
                 rospy.logerr('No param /' + model_name + '/xacro_file_path(or urdf_file_path)')
                 raise SystemExit
             if (use_moveit == 'true'):
                 if 'mesh_file_path' in model_info:
+                    obj_geometry_type = 'mesh'
                     mesh_file_path = model_info['mesh_file_path']
                     rospy.loginfo('  mesh_file_path: ' + mesh_file_path)
                     mesh_path = folder_path + '/' + mesh_file_path
+
+                    if 'mesh_position_offset' in model_info:
+                        mesh_position_offset = model_info['mesh_position_offset']
+                        rospy.loginfo('  mesh_position_offset: ' + str(mesh_position_offset))
+                    else:
+                        rospy.logerr('No param /' + model_name + '/mesh_position_offset')
+                        raise SystemExit
+                    if 'mesh_orientation_offset' in model_info:
+                        mesh_orientation_offset = model_info['mesh_orientation_offset']
+                        rospy.loginfo('  mesh_orientation_offset: ' + str(mesh_orientation_offset))
+                    else:
+                        rospy.logerr('No param /' + model_name + '/mesh_orientation_offset')
+                        raise SystemExit
+                elif 'solid_geometric_primitive' in model_info:
+                    obj_geometry_type = 'sgp'
+                    solid_geometric_primitive = model_info['solid_geometric_primitive']
+                    rospy.loginfo('  solid_geometric_primitive: ' + solid_geometric_primitive)
+                    if solid_geometric_primitive == 'box':
+                        if 'length' in model_info['xacro_args']:
+                            length = model_info['xacro_args']['length']
+                            rospy.loginfo('  length: ' + str(length))
+                        else:
+                            rospy.logerr('No param /' + model_name + '/xacro_args/length')
+                            raise SystemExit
+                        if 'width' in model_info['xacro_args']:
+                            width = model_info['xacro_args']['width']
+                            rospy.loginfo('  width: ' + str(width))
+                        else:
+                            rospy.logerr('No param /' + model_name + '/xacro_args/width')
+                            raise SystemExit
+                        if 'height' in model_info['xacro_args']:
+                            height = model_info['xacro_args']['height']
+                            rospy.loginfo('  height: ' + str(height))
+                        else:
+                            rospy.logerr('No param /' + model_name + '/xacro_args/height')
+                            raise SystemExit
+                    elif solid_geometric_primitive == 'sphere':
+                        if 'radius' in model_info['xacro_args']:
+                            radius = model_info['xacro_args']['radius']
+                            rospy.loginfo('  radius: ' + str(radius))
+                        else:
+                            rospy.logerr('No param /' + model_name + '/xacro_args/radius')
+                            raise SystemExit
+                    elif solid_geometric_primitive == 'cylinder':
+                        if 'height' in model_info['xacro_args']:
+                            height = model_info['xacro_args']['height']
+                            rospy.loginfo('  height: ' + str(height))
+                        else:
+                            rospy.logerr('No param /' + model_name + '/xacro_args/height')
+                            raise SystemExit
+                        if 'radius' in model_info['xacro_args']:
+                            radius = model_info['xacro_args']['radius']
+                            rospy.loginfo('  radius: ' + str(radius))
+                        else:
+                            rospy.logerr('No param /' + model_name + '/xacro_args/radius')
+                            raise SystemExit
+                    elif solid_geometric_primitive == 'cone':
+                        if 'height' in model_info['xacro_args']:
+                            height = model_info['xacro_args']['height']
+                            rospy.loginfo('  height: ' + str(height))
+                        else:
+                            rospy.logerr('No param /' + model_name + '/xacro_args/height')
+                            raise SystemExit
+                        if 'radius' in model_info['xacro_args']:
+                            radius = model_info['xacro_args']['radius']
+                            rospy.loginfo('  radius: ' + str(radius))
+                        else:
+                            rospy.logerr('No param /' + model_name + '/xacro_args/radius')
+                            raise SystemExit
+                    else:
+                        rospy.logerr('solid_geometric_primitive not in the list')
+                        raise SystemExit
+                    if 'sgp_position_offset' in model_info:
+                        sgp_position_offset = model_info['sgp_position_offset']
+                        rospy.loginfo('  sgp_position_offset: ' + str(sgp_position_offset))
+                    else:
+                        rospy.logerr('No param /' + model_name + '/sgp_position_offset')
+                        raise SystemExit
+                    if 'sgp_orientation_offset' in model_info:
+                        sgp_orientation_offset = model_info['sgp_orientation_offset']
+                        rospy.loginfo('  sgp_orientation_offset: ' + str(sgp_orientation_offset))
+                    else:
+                        rospy.logerr('No param /' + model_name + '/sgp_orientation_offset')
+                        raise SystemExit
                 else:
                     rospy.logerr('No param /' + model_name + '/mesh_file_path')
-                    raise SystemExit
-                if 'mesh_position_offset' in model_info:
-                    mesh_position_offset = model_info['mesh_position_offset']
-                    rospy.loginfo('  mesh_position_offset: ' + str(mesh_position_offset))
-                else:
-                    rospy.logerr('No param /' + model_name + '/mesh_position_offset')
-                    raise SystemExit
-                if 'mesh_orientation_offset' in model_info:
-                    mesh_orientation_offset = model_info['mesh_orientation_offset']
-                    rospy.loginfo('  mesh_orientation_offset: ' + str(mesh_orientation_offset))
-                else:
-                    rospy.logerr('No param /' + model_name + '/mesh_orientation_offset')
                     raise SystemExit
         else:
             rospy.logerr('Model param not found')
             return 'false'
         if (file_type == 'xacro'):
-            os.system('rosrun xacro xacro ' + xacro_path + ' > ' + urdf_path)
+            if 'xacro_args' in model_info:
+                xacro_args = ''
+                for xacro_arg_name in model_info['xacro_args'].keys():
+                    xacro_args = xacro_args + xacro_arg_name + ':=' + str(model_info['xacro_args'][xacro_arg_name]) + ' '
+                    if xacro_arg_name == 'radius':
+                        mesh_scaling[0] = model_info['xacro_args'][xacro_arg_name] * 2
+                        mesh_scaling[1] = model_info['xacro_args'][xacro_arg_name] * 2
+                    elif xacro_arg_name == 'height':
+                        mesh_scaling[2] = model_info['xacro_args'][xacro_arg_name]
+                    elif xacro_arg_name == 'length':
+                        mesh_scaling[0] = model_info['xacro_args'][xacro_arg_name]
+                    elif xacro_arg_name == 'width':
+                        mesh_scaling[1] = model_info['xacro_args'][xacro_arg_name]
+                os.system('rosrun xacro xacro ' + xacro_path + ' > ' + urdf_path + ' ' + xacro_args)
+            else:
+                os.system('rosrun xacro xacro ' + xacro_path + ' > ' + urdf_path)
+                rospy.sleep(0.5)
 
         if (srv.fixed[x]):
             fixed = 1
@@ -269,54 +354,98 @@ def spawn_model(srv,
         objects[object_name]['spawned'] = False
         objects[object_name]['attached'] = False
         objects[object_name]['object_id'] = p.loadURDF(urdf_path, start_pos, start_orientation, 0, fixed, flags = p.URDF_USE_INERTIA_FROM_FILE)
+        os.system('rm /' + urdf_path)
         objects[object_name]['spawned'] = True
 
         tfl = tf.TransformListener()
 
         if (use_moveit == 'true'):
-            mesh = Mesh()
-            # with pyassimp.load(mesh_path) as mesh_file:
-            mesh_file = pyassimp.load(mesh_path)
-            for face in mesh_file.meshes[0].faces:
-                triangle = MeshTriangle()
-                if len(face) == 3:
-                    triangle.vertex_indices = [face[0],
-                                               face[1],
-                                               face[2]]
-                mesh.triangles.append(triangle)
-            for vertex in mesh_file.meshes[0].vertices:
-                point = Point()
-                point.x = vertex[0]
-                point.y = vertex[1]
-                point.z = vertex[2]
-                mesh.vertices.append(point)
+            if obj_geometry_type == 'mesh':
+                mesh = Mesh()
+                with pyassimp.load(mesh_path) as mesh_file:
+                # mesh_file = pyassimp.load(mesh_path)
+                    for face in mesh_file.meshes[0].faces:
+                        triangle = MeshTriangle()
+                        if len(face) == 3:
+                            triangle.vertex_indices = [face[0],
+                                                    face[1],
+                                                    face[2]]
+                        mesh.triangles.append(triangle)
+                    for vertex in mesh_file.meshes[0].vertices:
+                        point = Point()
+                        point.x = vertex[0] * mesh_scaling[0]
+                        point.y = vertex[1] * mesh_scaling[1]
+                        point.z = vertex[2] * mesh_scaling[2]
+                        mesh.vertices.append(point)
 
-            pose = Pose()
-            pose.position.x = 0
-            pose.position.y = 0
-            pose.position.z = 0
-            pose.orientation.x = 0
-            pose.orientation.y = 0
-            pose.orientation.z = 0
-            pose.orientation.w = 1
+                pose = Pose()
+                pose.position.x = 0
+                pose.position.y = 0
+                pose.position.z = 0
+                pose.orientation.x = 0
+                pose.orientation.y = 0
+                pose.orientation.z = 0
+                pose.orientation.w = 1
 
-            mesh_pose = Pose()
-            mesh_pose.position.x = mesh_position_offset[0]
-            mesh_pose.position.y = mesh_position_offset[1]
-            mesh_pose.position.z = mesh_position_offset[2]
-            mesh_pose.orientation.x = mesh_orientation_offset[0]
-            mesh_pose.orientation.y = mesh_orientation_offset[1]
-            mesh_pose.orientation.z = mesh_orientation_offset[2]
-            mesh_pose.orientation.w = mesh_orientation_offset[3]
+                mesh_pose = Pose()
+                mesh_pose.position.x = mesh_position_offset[0]
+                mesh_pose.position.y = mesh_position_offset[1]
+                mesh_pose.position.z = mesh_position_offset[2]
+                mesh_pose.orientation.x = mesh_orientation_offset[0]
+                mesh_pose.orientation.y = mesh_orientation_offset[1]
+                mesh_pose.orientation.z = mesh_orientation_offset[2]
+                mesh_pose.orientation.w = mesh_orientation_offset[3]
 
-            c_obj = CollisionObject()
-            c_obj.header.stamp = rospy.Time.now()
-            c_obj.header.frame_id = object_name
-            c_obj.id = object_name + '_'
-            c_obj.pose = pose
-            c_obj.meshes.append(mesh)
-            c_obj.mesh_poses.append(mesh_pose)
-            c_obj.operation = c_obj.ADD
+                c_obj = CollisionObject()
+                c_obj.header.stamp = rospy.Time.now()
+                c_obj.header.frame_id = object_name
+                c_obj.id = object_name + '_'
+                c_obj.pose = pose
+                c_obj.meshes.append(mesh)
+                c_obj.mesh_poses.append(mesh_pose)
+                c_obj.operation = c_obj.ADD
+
+            elif obj_geometry_type == 'sgp':
+                sgp = SolidPrimitive()
+                if solid_geometric_primitive == 'box':
+                    sgp.type = SolidPrimitive.BOX
+                    sgp.dimensions = [length, width, height]
+                elif solid_geometric_primitive == 'sphere':
+                    sgp.type = SolidPrimitive.SPHERE
+                    sgp.dimensions = [radius]
+                elif solid_geometric_primitive == 'cylinder':
+                    sgp.type = SolidPrimitive.CYLINDER
+                    sgp.dimensions = [height,radius]
+                elif solid_geometric_primitive == 'cone':
+                    sgp.type = SolidPrimitive.CONE
+                    sgp.dimensions = [height,radius]
+
+                pose = Pose()
+                pose.position.x = 0
+                pose.position.y = 0
+                pose.position.z = 0
+                pose.orientation.x = 0
+                pose.orientation.y = 0
+                pose.orientation.z = 0
+                pose.orientation.w = 1
+
+                sgp_pose = Pose()
+                sgp_pose.position.x    = sgp_position_offset[0]
+                sgp_pose.position.y    = sgp_position_offset[1]
+                sgp_pose.position.z    = sgp_position_offset[2]
+                sgp_pose.orientation.x = sgp_orientation_offset[0]
+                sgp_pose.orientation.y = sgp_orientation_offset[1]
+                sgp_pose.orientation.z = sgp_orientation_offset[2]
+                sgp_pose.orientation.w = sgp_orientation_offset[3]
+
+                c_obj = CollisionObject()
+                c_obj.header.stamp = rospy.Time.now()
+                c_obj.header.frame_id = object_name
+                c_obj.id = object_name + '_'
+                c_obj.pose = pose
+                c_obj.primitives.append(sgp)
+                c_obj.primitive_poses.append(sgp_pose)
+                c_obj.operation = c_obj.ADD
 
             a_obj = AttachedCollisionObject()
             a_obj.link_name = ''
@@ -346,6 +475,81 @@ def spawn_model(srv,
         if (use_moveit == 'true'):
             while not (tfl.frameExists(object_name,)):
                 rospy.sleep(0.00001)
+
+        if 'link_dynamics' in model_info:
+            link_to_ind = {p.getBodyInfo(objects[object_name]['object_id'])[0].decode('UTF-8'): -1, }
+            for joint_id in range(p.getNumJoints(objects[object_name]['object_id'])):
+                link_name = p.getJointInfo(objects[object_name]['object_id'], joint_id)[12].decode('UTF-8')
+                link_to_ind[link_name] = joint_id
+
+            links_dyn = model_info['link_dynamics']
+            rospy.loginfo('  link dynamics: ')
+            for link_dyn in links_dyn:
+                if 'link_name' in link_dyn:
+                    link_name = link_dyn['link_name']
+                    rospy.loginfo('      link_name: ' + link_name)
+                else:
+                    rospy.logerr('No param /' + object_name + '/link_dynamics/link_name')
+                    raise SystemExit
+                current_dyn_info = p.getDynamicsInfo(objects[object_name]['object_id'], link_to_ind[link_name])
+                if 'lateral_friction' in link_dyn:
+                    lateral_friction = link_dyn['lateral_friction']
+                    rospy.loginfo('      lateral_friction: ' + str(lateral_friction))
+                else:
+                    lateral_friction = current_dyn_info[1]
+                    rospy.logwarn('No param /' + object_name + '/link_dynamics/lateral_friction, current value:' + str(lateral_friction))
+                if 'spinning_friction' in link_dyn:
+                    spinning_friction = link_dyn['spinning_friction']
+                    rospy.loginfo('      spinning_friction: ' + str(spinning_friction))
+                else:
+                    spinning_friction = current_dyn_info[7]
+                    rospy.logwarn('No param /' + object_name + '/link_dynamics/spinning_friction, current value:' + str(spinning_friction))
+                if 'rolling_friction' in link_dyn:
+                    rolling_friction = link_dyn['rolling_friction']
+                    rospy.loginfo('      rolling_friction: ' + str(rolling_friction))
+                else:
+                    rolling_friction = current_dyn_info[6]
+                    rospy.logwarn('No param /' + object_name + '/link_dynamics/rolling_friction, current value:' + str(rolling_friction))
+                if 'contact_stiffness' in link_dyn:
+                    contact_stiffness = link_dyn['contact_stiffness']
+                    rospy.loginfo('      contact_stiffness: ' + str(contact_stiffness))
+                else:
+                    contact_stiffness = current_dyn_info[9]
+                    rospy.logwarn('No param /' + object_name + '/link_dynamics/contact_stiffness, current value:' + str(contact_stiffness))
+                if 'contact_damping' in link_dyn:
+                    contact_damping = link_dyn['contact_damping']
+                    rospy.loginfo('      contact_damping: ' + str(contact_damping))
+                else:
+                    contact_damping = current_dyn_info[8]
+                    rospy.logwarn('No param /' + object_name + '/link_dynamics/contact_damping, current value:' + str(contact_damping))
+                if 'linear_damping' in link_dyn:
+                    linear_damping = link_dyn['linear_damping']
+                    rospy.loginfo('      linear_damping: ' + str(linear_damping))
+                else:
+                    linear_damping = 0.4
+                    rospy.logwarn('No param /' + object_name + '/link_dynamics/linear_damping, current value:' + str(linear_damping))
+                if 'angular_damping' in link_dyn:
+                    angular_damping = link_dyn['angular_damping']
+                    rospy.loginfo('      angular_damping: ' + str(angular_damping))
+                else:
+                    angular_damping = 0.4
+                    rospy.logwarn('No param /' + object_name + '/link_dynamics/angular_damping, current value:' + str(angular_damping))
+                if 'friction_anchor' in link_dyn:
+                    friction_anchor = link_dyn['friction_anchor']
+                    rospy.loginfo('      friction_anchor: ' + str(friction_anchor))
+                else:
+                    friction_anchor = 0
+                    rospy.logwarn('No param /' + object_name + '/link_dynamics/friction_anchor, current value:' + str(friction_anchor))
+                p.changeDynamics(objects[object_name]['object_id'], link_to_ind[link_name],
+                                 lateralFriction=lateral_friction,
+                                 spinningFriction=spinning_friction,
+                                 rollingFriction=rolling_friction,
+                                 contactStiffness=contact_stiffness,
+                                 contactDamping=contact_damping,
+                                 linearDamping=linear_damping,
+                                 angularDamping=angular_damping,
+                                 frictionAnchor=friction_anchor)
+
     rospy.loginfo('Model spawned')
     return 'true'
 
@@ -838,20 +1042,14 @@ def main():
             file_type = 'urdf'
             urdf_file_path = robot_info['urdf_file_path']
             rospy.loginfo('  urdf_file_path: ' + urdf_file_path)
-            urdf_path = folder_path + '/' + urdf_file_path
-            if (urdf_path.find('.urdf') == -1):
-                rospy.logerr('  urdf_file_path do not has extension .urdf')
-                raise SystemExit
+            urdf_path = folder_path + '/' + urdf_file_path + '.urdf'
         elif 'xacro_file_path' in robot_info:
             file_type = 'xacro'
             xacro_file_path = robot_info['xacro_file_path']
             rospy.loginfo('  xacro_file_name: ' + xacro_file_path)
             xacro_path = folder_path + '/' + xacro_file_path
-            if (xacro_path.find('.xacro') != -1):
-                urdf_path = xacro_path.replace('.xacro', '.urdf')
-            else:
-                rospy.logerr('  xacro_file_path do not has extension .xacro')
-                raise SystemExit
+            urdf_path = xacro_path + '.urdf'
+            xacro_path = xacro_path + '.xacro'
         else:
             rospy.logerr('No param /' + robot_name + '/xacro_file_path(or urdf_file_path)')
             raise SystemExit
@@ -936,6 +1134,7 @@ def main():
         file.close()
 
         robot_id[robot_name] = p.loadURDF(urdf_path, start_pos, start_orientation, 0, fixed, flags=p.URDF_USE_INERTIA_FROM_FILE)
+        os.system('rm /' + urdf_path)
         rospy.loginfo('  robot_id: ' + str(robot_id[robot_name]))
 
         link_name_to_index[robot_name] = {p.getBodyInfo(robot_id[robot_name])[0].decode('UTF-8'): -1, }
@@ -1169,14 +1368,13 @@ def main():
                     rospy.loginfo('      angular_damping: ' + str(angular_damping))
                 else:
                     angular_damping = 0.4
-                    rospy.logwarn('No param /' + robot_name + '/link_dynamics/angular_damping' + str(angular_damping))
-                    raise SystemExit
+                    rospy.logwarn('No param /' + robot_name + '/link_dynamics/angular_damping, current value:' + str(angular_damping))
                 if 'friction_anchor' in link_dyn:
                     friction_anchor = link_dyn['friction_anchor']
                     rospy.loginfo('      friction_anchor: ' + str(friction_anchor))
                 else:
                     friction_anchor = 0
-                    rospy.logwarn('No param /' + robot_name + '/link_dynamics/friction_anchor' + str(friction_anchor))
+                    rospy.logwarn('No param /' + robot_name + '/link_dynamics/friction_anchor, current value:' + str(friction_anchor))
                 p.changeDynamics(robot_id[robot_name], link_name_to_index[robot_name][link_name],
                                  lateralFriction=lateral_friction,
                                  spinningFriction=spinning_friction,
@@ -1277,20 +1475,14 @@ def main():
             file_type = 'urdf'
             urdf_file_path = env_info['urdf_file_path']
             rospy.loginfo('  urdf_file_path: ' + urdf_file_path)
-            urdf_path = folder_path + '/' + urdf_file_path
-            if (urdf_path.find('.urdf') == -1):
-                rospy.logerr('  urdf_file_path do not has extension .urdf')
-                raise SystemExit
+            urdf_path = folder_path + '/' + urdf_file_path + '.urdf'
         elif 'xacro_file_path' in env_info:
             file_type = 'xacro'
             xacro_file_path = env_info['xacro_file_path']
             rospy.loginfo('  xacro_file_name: ' + xacro_file_path)
             xacro_path = folder_path + '/' + xacro_file_path
-            if (xacro_path.find('.xacro') != -1):
-                urdf_path = xacro_path.replace('.xacro', '.urdf')
-            else:
-                rospy.logerr('  xacro_file_path do not has extension .xacro')
-                raise SystemExit
+            urdf_path = xacro_path + '.urdf'
+            xacro_path = xacro_path + '.xacro'
         else:
             rospy.logerr('No param /' + env_part + '/xacro_file_path(or urdf_file_path)')
             raise SystemExit
@@ -1390,6 +1582,7 @@ def main():
         file.close()
 
         robot_id[env_part] = p.loadURDF(urdf_path, start_pos, start_orientation, 0, fixed, flags=p.URDF_USE_INERTIA_FROM_FILE)
+        os.system('rm /' + urdf_path)
         rospy.loginfo('  robot_id: ' + str(robot_id[env_part]))
 
         link_name_to_index[env_part] = {p.getBodyInfo(robot_id[env_part])[0].decode('UTF-8'): -1, }
