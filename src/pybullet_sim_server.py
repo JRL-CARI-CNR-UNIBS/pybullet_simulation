@@ -349,6 +349,23 @@ def spawn_model(srv,
 
         start_pos = [pose.position.x, pose.position.y, pose.position.z]
         start_orientation = [pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]
+
+        if (use_moveit == 'true'):
+            if not objects:
+                get_scene_clnt = rospy.ServiceProxy('get_planning_scene', GetPlanningScene)
+                req = PlanningSceneComponents()
+                req.components = sum([PlanningSceneComponents.WORLD_OBJECT_NAMES,
+                                      PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
+                                      PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
+
+                scenes_lock.acquire()
+                scenes[0] = get_scene_clnt.call(req).scene
+                scenes[0].robot_state.joint_state.name     = []
+                scenes[0].robot_state.joint_state.position = []
+                scenes[0].robot_state.joint_state.velocity = []
+                scenes[0].robot_state.joint_state.effort   = []
+                scenes_lock.release()
+
         objects_lock.acquire()
         objects[object_name] = {}
         objects[object_name]['spawned'] = False
@@ -453,17 +470,7 @@ def spawn_model(srv,
 
             objects[object_name]['object'] = a_obj
 
-            get_scene_clnt = rospy.ServiceProxy('get_planning_scene', GetPlanningScene)
-            req = PlanningSceneComponents()
-            req.components = sum([PlanningSceneComponents.WORLD_OBJECT_NAMES,
-                                  PlanningSceneComponents.WORLD_OBJECT_GEOMETRY,
-                                  PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS])
             scenes_lock.acquire()
-            scenes[0] = get_scene_clnt.call(req).scene
-            scenes[0].robot_state.joint_state.name     = []
-            scenes[0].robot_state.joint_state.position = []
-            scenes[0].robot_state.joint_state.velocity = []
-            scenes[0].robot_state.joint_state.effort   = []
             scenes[0].is_diff = True
             scenes[0].robot_state.is_diff = True
             scenes[0].world.collision_objects.append(c_obj)
@@ -563,7 +570,6 @@ def delete_model(srv,
                  scenes_lock):
     for object_name in srv.object_name:
         if object_name not in objects.keys():
-            print(objects.keys())
             rospy.logwarn(object_name + ' is not in the scene')
             continue
         id = objects[object_name]['object_id']
